@@ -32,9 +32,11 @@
 | 供应商 | stitch |
 | API 模型 | Stage Model (apiType: stageMode) |
 | 开发语言 | ArkTS (TypeScript 方言) |
-| 构建工具 | Hvigor 6.1.0 |
+| 构建工具 | Hvigor 6.1.0（`hvigor/hvigor-config.json5` → `modelVersion`） |
 | 支持设备 | 手机 (phone)、平板 (tablet) |
-| 最低 SDK | HarmonyOS API 9+ |
+| 兼容 SDK | `5.0.0(12)`（`build-profile.json5` → `compatibleSdkVersion`） |
+| 目标 SDK | `6.1.0(23)`（`build-profile.json5` → `targetSdkVersion`） |
+| 运行时 | HarmonyOS（`runtimeOS`） |
 
 ---
 
@@ -69,7 +71,7 @@
 |------|------|------|
 | UI 框架 | ArkUI (声明式) | @Component / @Builder / @Entry |
 | 编程语言 | ArkTS | TypeScript 超集，HarmonyOS 原生语言 |
-| 状态管理 | @State / @StorageLink | 组件内响应式状态 |
+| 状态管理 | `@State` | 组件内响应式状态（未使用 `@StorageLink` / AppStorage） |
 | 生命周期 | Stage 模型 | UIAbility + WindowStage |
 | 构建系统 | Hvigor | 官方构建工具，HAP 打包 |
 | 页面路由 | main_pages.json | 声明式页面注册 |
@@ -79,67 +81,63 @@
 
 ## 3. 项目结构
 
+本仓库为 **可运行的 HarmonyOS Stage 工程**，UI 由 HTML 原型迁移为 ArkUI 后集中在 `Index.ets`。不包含历史上的 HTML 静态稿目录（如 `dashboard_v2/`、`vitality_tech_health/` 等）；若需对照设计稿，请从 Stitch 完整交付包或其它分支获取。
+
 ```
 stitch_harmonyos_ai_health_monitor/
 │
-├── AppScope/                                # 应用级配置目录
-│   └── app.json5                            #   应用全局配置（包名、版本、图标）
+├── AppScope/
+│   └── app.json5                            # 应用全局配置（包名、版本、图标/名称引用）
 │
 ├── entry/                                   # 主入口模块 (entry HAP)
-│   ├── build-profile.json5                  #   模块构建配置 (Stage 模型)
-│   ├── hvigorfile.ts                        #   Hvigor 构建任务定义
-│   ├── oh-package.json5                     #   模块包描述 · 三方依赖声明
+│   ├── build-profile.json5
+│   ├── hvigorfile.ts
+│   ├── oh-package.json5
 │   │
-│   ├── src/main/
-│   │   ├── module.json5                     #   模块清单 (Ability · Skills · 页面路由)
-│   │   │
-│   │   ├── ets/                             #   ArkTS 源码目录
-│   │   │   ├── entryability/
-│   │   │   │   └── EntryAbility.ets         #   应用入口 Ability
-│   │   │   └── pages/
-│   │   │       └── Index.ets                #   主页面（4 Tab 单文件组件）
-│   │   │
-│   │   └── resources/                       #   资源目录
-│   │       └── base/
-│   │           ├── element/
-│   │           │   ├── string.json          #   字符串资源
-│   │           │   └── color.json           #   颜色资源
-│   │           ├── media/
-│   │           │   └── app_icon.svg         #   应用图标
-│   │           └── profile/
-│   │               └── main_pages.json      #   页面路由注册表
-│   │
-│   └── .preview/                            #   预览器配置（IDE 自动生成）
+│   └── src/main/
+│       ├── module.json5
+│       │
+│       ├── ets/
+│       │   ├── entryability/
+│       │   │   └── EntryAbility.ets
+│       │   ├── pages/
+│       │   │   └── Index.ets                # 4 Tab 单文件 UI + AppColor + 状态逻辑
+│       │   ├── model/                       # 预留（当前无源码文件）
+│       │   └── theme/                       # 预留（当前无源码文件）
+│       │
+│       └── resources/base/
+│           ├── element/string.json, color.json
+│           ├── media/app_icon.svg
+│           └── profile/main_pages.json
 │
-├── hvigor/                                  # Hvigor 构建系统全局配置
-│   └── hvigor-config.json5                  #   构建工具配置
-│
-├── vitality_tech_health/                    # 设计系统文档
-│   └── DESIGN.md                            #   UI/UX 设计规范
-│
-├── dashboard_v2/                            # 页面设计稿 (HTML 静态稿)
-├── focus_timer_v2/                          # 专注计时器设计稿
-├── sports_v2/                               # 运动页面设计稿
-├── profile_v2/                              # 个人页面设计稿
-├── settings/                                # 设置页面设计稿
-└── background_selection/                    # 背景选择设计稿
+├── hvigor/hvigor-config.json5
+├── hvigorfile.ts                            # 工程级 Hvigor 入口
+├── build-profile.json5                      # 工程级 SDK 与模块映射
+├── oh-package.json5                         # 工程级 OHPM 描述
+├── README.md
+└── PROJECT_DOCUMENTATION.md
 ```
+
+**本地生成、通常不入 Git 的目录**（见 `.gitignore`）：`entry/build/`、`entry/.preview/`、`.hvigor/`、`.idea/` 等。在 DevEco 中打开工程并构建后才会出现。
 
 ### 文件说明
 
 | 文件 | 作用 | 必须 |
 |------|------|:----:|
 | `AppScope/app.json5` | 定义应用包名、版本、图标等全局属性 | ✅ |
+| `build-profile.json5` | 工程级 compatible/target SDK、entry 模块引用 | ✅ |
+| `oh-package.json5` | 工程级 OHPM 描述 | ✅ |
+| `hvigorfile.ts` | 工程级 Hvigor 构建入口 | ✅ |
 | `entry/src/main/module.json5` | 模块清单：声明 Ability、页面路由、Skills | ✅ |
 | `entry/src/main/ets/entryability/EntryAbility.ets` | 应用入口：窗口创建与页面加载 | ✅ |
 | `entry/src/main/ets/pages/Index.ets` | 主界面：所有 UI 组件的单文件实现 | ✅ |
 | `entry/src/main/resources/base/profile/main_pages.json` | 页面路由注册 | ✅ |
-| `entry/src/main/resources/base/element/string.json` | 多语言字符串资源 | 推荐 |
-| `entry/src/main/resources/base/element/color.json` | 主题色资源 | 推荐 |
+| `entry/src/main/resources/base/element/string.json` | 应用名等字符串资源 | 推荐 |
+| `entry/src/main/resources/base/element/color.json` | 启动页背景等颜色资源 | 推荐 |
 | `entry/build-profile.json5` | 模块编译配置 | ✅ |
 | `entry/hvigorfile.ts` | 模块构建任务 | ✅ |
-| `entry/oh-package.json5` | 三方依赖管理 | ✅ |
-| `hvigor/hvigor-config.json5` | 全局构建配置 | ✅ |
+| `entry/oh-package.json5` | 模块三方依赖（当前为空） | ✅ |
+| `hvigor/hvigor-config.json5` | Hvigor `modelVersion` 等全局配置 | ✅ |
 
 ---
 
@@ -283,7 +281,7 @@ timerSeconds 每秒 -1
 
 ## 6. 设计系统
 
-基于 `vitality_tech_health/DESIGN.md` 定义的 **Vitality Tech Health** 设计体系。
+采用 **Vitality Tech Health** 视觉规范（色板与间距约定见下文）。实现上由 `entry/src/main/ets/pages/Index.ets` 内的 `AppColor` 静态类承载主色；`resources/base/element/color.json` 仅用于模块配置中的启动页背景等资源引用。
 
 ### 6.1 色彩系统
 
@@ -410,17 +408,21 @@ hvigorw assembleHap    # 编译 HAP
 
 ### 8.3 运行要求
 
-- HarmonyOS NEXT 真机 / 模拟器
-- API Level 9 及以上
-- 支持设备：Phone、Tablet
+- HarmonyOS NEXT 真机或模拟器
+- DevEco Studio 与工程 `build-profile.json5` 中声明的 SDK 一致（当前 **compatibleSdkVersion `5.0.0(12)`**、**targetSdkVersion `6.1.0(23)`**）
+- 支持设备：Phone、Tablet（见 `module.json5` → `deviceTypes`）
 
 ### 8.4 构建产物
 
+构建成功后（目录由 Hvigor 生成，默认被 `.gitignore` 忽略）：
+
 ```
 entry/build/default/outputs/default/
-├── entry-default-signed.hap    # 签名的 HAP 包
-└── entry-default-unsigned.hap  # 未签名的 HAP 包
+├── entry-default-signed.hap      # 已签名 HAP（需先配置 Signing Configs）
+└── entry-default-unsigned.hap    # 未签名 HAP
 ```
+
+实际文件名可能随 DevEco / Hvigor 版本略有差异，以 `entry/build/.../outputs/` 下产物为准。
 
 ---
 
@@ -464,7 +466,8 @@ entry/build/default/outputs/default/
 
 ### 短期优化
 
-- [ ] 抽取各 Tab 页面为独立 `@Component`，拆分 `Index.ets`
+- [ ] 抽取各 Tab 页面为独立 `@Component`，拆分 `Index.ets`；将 `AppColor` 迁入 `ets/theme/`
+- [ ] 在 `ets/model/` 中建立健康数据模型，与 UI 解耦
 - [ ] 引入真机脑电设备 SDK 对接，替换模拟数据
 - [ ] 添加本地数据库（如 `@ohos.data.relationalStore`）持久化用户健康数据
 - [ ] 完善设置页面功能（背景切换实际生效、数据导出等）
@@ -486,6 +489,6 @@ entry/build/default/outputs/default/
 
 ---
 
-> **文档生成日期**：2026-05-28  
+> **文档更新日期**：2026-05-29  
 > **维护者**：stitch  
-> **许可证**：Apache-2.0
+> **说明**：本仓库未附带 `LICENSE` 文件；使用前请与项目维护方确认授权范围。

@@ -15,7 +15,7 @@
  *
  * 技术栈：
  *   - ArkTS 声明式 UI + @Component/@Builder 组件化架构
- *   - @State/@StorageLink 响应式状态管理
+ *   - @State 组件内响应式状态（未使用 @StorageLink）
  *   - 中英双语国际化支持（默认中文）
  *   - 自定义 AppColor 设计系统
  *
