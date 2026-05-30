@@ -1,5 +1,7 @@
 # DevEco / local IDE state
 .idea/
+.cursor/
+.cursor
 *.iml
 local.properties
 

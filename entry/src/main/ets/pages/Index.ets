@@ -57,6 +57,11 @@ class AppColor {
   static readonly Danger: string = '#FF4D4F';
 }
 
+/** 番茄钟默认时长（25 分钟），与 Progress 环 total 默认值一致 */
+const DEFAULT_FOCUS_SEC: number = 1500;
+/** 自定义专注时长上限（24 小时） */
+const MAX_FOCUS_SEC: number = 86400;
+
 // ============================================================================
 // Index - 应用主组件（@Entry 入口 + @Component 自定义组件）
 // ============================================================================
@@ -73,10 +78,16 @@ struct Index {
   @State private focusScore: number = 88;
   /** 疲劳指数 (0-100)，数值越高越疲劳 */
   @State private fatigueScore: number = 78;
-  /** 番茄钟剩余秒数（默认 25 分钟 = 1500 秒） */
-  @State private timerSeconds: number = 1500;
+  /** 番茄钟剩余秒数（默认 25 分钟） */
+  @State private timerSeconds: number = DEFAULT_FOCUS_SEC;
+  /** 番茄钟设定的总时长（秒），可由自定义弹窗修改 */
+  @State private focusDurationSec: number = DEFAULT_FOCUS_SEC;
   /** 计时器是否正在运行 */
   @State private timerRunning: boolean = false;
+  /** 是否显示自定义专注时长弹窗 */
+  @State private showDurationDialog: boolean = false;
+  /** 弹窗内滚轮选中的时长（时/分/秒映射为 Date） */
+  @State private draftDurationDate: Date = new Date(1970, 0, 1, 0, 25, 0);
   /** 是否启用设备自动重连 */
   @State private autoReconnect: boolean = true;
   /** 是否启用云端数据同步 */
@@ -101,8 +112,8 @@ struct Index {
   // 私有成员变量
   // ──────────────────────────────────────────────────────────────────────────
 
-  /** 定时器 ID，用于 clearInterval */
-  private timerId: number = 0;
+  /** 番茄钟 setTimeout 链 ID（-1 表示无待执行 tick） */
+  private focusTimerId: number = -1;
   /** 脑电频谱模拟数据（实时波柱高度数组） */
   private barValues: number[] = [32, 46, 24, 60, 36, 72, 28, 52, 42, 66, 34, 48];
 
@@ -141,52 +152,113 @@ struct Index {
 
   /**
    * 组件即将销毁时调用
-   * 清理定时器，防止内存泄漏
+   * 暂停番茄钟，防止页面销毁后仍计时
    */
   aboutToDisappear(): void {
-    this.stopTimer();
+    this.pauseFocusTimer();
   }
 
   // ==========================================================================
-  // 计时器逻辑
+  // 番茄钟逻辑（setTimeout 链式调度，避免 setInterval/clearInterval 与隐藏 TextTimer 问题）
   // ==========================================================================
 
-  /**
-   * 启动番茄钟计时器
-   * 每秒递减，模拟脑电专注指数波动（每 3 秒 +1）
-   */
-  private startTimer(): void {
-    if (this.timerRunning) {
-      return; // 防止重复启动
+  /** 调度下一秒 tick；仅当 timerRunning 为 true 时继续链式调用 */
+  private scheduleFocusTick(): void {
+    if (!this.timerRunning) {
+      return;
     }
-    this.timerRunning = true;
-    this.timerId = setInterval(() => {
+    this.focusTimerId = setTimeout(() => {
+      if (!this.timerRunning) {
+        return;
+      }
       if (this.timerSeconds <= 0) {
-        this.stopTimer();
+        this.pauseFocusTimer();
         return;
       }
       this.timerSeconds -= 1;
-      // 模拟专注指数波动（每 3 秒递增 1，到 94 后重置为 86）
-      if (this.timerSeconds % 3 === 0) {
+      if (this.timerSeconds > 0 && this.timerSeconds % 3 === 0) {
         this.focusScore = this.focusScore >= 94 ? 86 : this.focusScore + 1;
+      }
+      if (this.timerRunning) {
+        this.scheduleFocusTick();
       }
     }, 1000);
   }
 
-  /** 停止番茄钟计时器 */
-  private stopTimer(): void {
-    if (this.timerId !== 0) {
-      clearInterval(this.timerId);
-      this.timerId = 0;
-    }
+  /** 暂停番茄钟 */
+  private pauseFocusTimer(): void {
     this.timerRunning = false;
+    if (this.focusTimerId !== -1) {
+      clearTimeout(this.focusTimerId);
+      this.focusTimerId = -1;
+    }
   }
 
-  /** 重置计时器到 25 分钟并恢复默认专注指数 */
-  private resetTimer(): void {
-    this.stopTimer();
-    this.timerSeconds = 1500;
+  /** 开始或继续番茄钟 */
+  private startFocusTimer(): void {
+    if (this.timerRunning) {
+      return;
+    }
+    if (this.timerSeconds <= 0) {
+      this.timerSeconds = this.focusDurationSec;
+    }
+    this.timerRunning = true;
+    this.scheduleFocusTick();
+  }
+
+  /** 重置番茄钟到设定总时长并停止 */
+  private resetFocusTimer(): void {
+    this.pauseFocusTimer();
+    this.timerSeconds = this.focusDurationSec;
     this.focusScore = 88;
+  }
+
+  /** 将秒数转为 TimePicker 用的 Date（1970-01-01 HH:mm:ss） */
+  private dateFromSeconds(total: number): Date {
+    const safeTotal: number = Math.max(0, Math.min(total, MAX_FOCUS_SEC));
+    const hours: number = Math.floor(safeTotal / 3600);
+    const minutes: number = Math.floor((safeTotal % 3600) / 60);
+    const seconds: number = safeTotal % 60;
+    return new Date(1970, 0, 1, hours, minutes, seconds);
+  }
+
+  /** 从 TimePicker Date 读取总秒数 */
+  private secondsFromDate(date: Date): number {
+    return date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+  }
+
+  /** 打开自定义专注时长弹窗 */
+  private openDurationDialog(): void {
+    if (this.timerRunning) {
+      return;
+    }
+    this.draftDurationDate = this.dateFromSeconds(this.timerSeconds);
+    this.showDurationDialog = true;
+  }
+
+  /** 取消自定义时长 */
+  private cancelDurationDialog(): void {
+    this.showDurationDialog = false;
+  }
+
+  /** 确认自定义时长并应用到番茄钟 */
+  private confirmDurationDialog(): void {
+    const total: number = this.secondsFromDate(this.draftDurationDate);
+    if (total <= 0) {
+      return;
+    }
+    this.pauseFocusTimer();
+    this.focusDurationSec = Math.min(total, MAX_FOCUS_SEC);
+    this.timerSeconds = this.focusDurationSec;
+    this.showDurationDialog = false;
+  }
+
+  /** 切换 Tab；离开专注页时自动暂停计时 */
+  private switchTab(index: number): void {
+    if (this.currentTab === 1 && index !== 1 && this.timerRunning) {
+      this.pauseFocusTimer();
+    }
+    this.currentTab = index;
   }
 
   /**
@@ -194,10 +266,14 @@ struct Index {
    * @returns "MM:SS" 格式的时间字符串
    */
   private timerText(): string {
-    const minutes: number = Math.floor(this.timerSeconds / 60);
+    const hours: number = Math.floor(this.timerSeconds / 3600);
+    const minutes: number = Math.floor((this.timerSeconds % 3600) / 60);
     const seconds: number = this.timerSeconds % 60;
-    const secondsText: string = seconds < 10 ? '0' + seconds.toString() : seconds.toString();
-    return minutes.toString() + ':' + secondsText;
+    const pad = (value: number): string => value < 10 ? '0' + value.toString() : value.toString();
+    if (hours > 0) {
+      return hours.toString() + ':' + pad(minutes) + ':' + pad(seconds);
+    }
+    return minutes.toString() + ':' + pad(seconds);
   }
 
   // ==========================================================================
@@ -240,6 +316,16 @@ struct Index {
 
       // ── 固定在底部的导航栏 ──
       this.BottomNav()
+
+      if (this.showDurationDialog) {
+        Stack() {
+          this.FocusDurationDialog()
+        }
+        .width('100%')
+        .height('100%')
+        .position({ x: 0, y: 0 })
+        .zIndex(1000)
+      }
     }
     .width('100%')
     .height('100%')
@@ -543,7 +629,7 @@ struct Index {
       // ── 环形计时器 ──
       // 进度 = 剩余时间 / 总时间，颜色在最后 1 分钟变红
       Stack() {
-        Progress({ value: this.timerSeconds, total: 1500, type: ProgressType.Ring })
+        Progress({ value: this.timerSeconds, total: this.focusDurationSec, type: ProgressType.Ring })
           .width(280)
           .height(280)
           .color(this.timerSeconds <= 60 ? AppColor.Danger : AppColor.Good)
@@ -559,9 +645,8 @@ struct Index {
       }
       .margin({ top: 18 })
 
-      // ── 控制按钮行 ──
+      // ── 控制按钮行：重置 | 开始/暂停 | 自定义 ──
       Row({ space: 12 }) {
-        // 重置按钮：恢复 25 分钟倒计时
         Button(this.t('重置', 'Reset'))
           .layoutWeight(1)
           .height(54)
@@ -569,12 +654,11 @@ struct Index {
           .fontColor(AppColor.Muted)
           .backgroundColor(AppColor.Surface)
           .onClick(() => {
-            this.resetTimer();
+            this.resetFocusTimer();
           })
 
-        // 开始/暂停按钮（两态切换）
         Button(this.timerRunning ? this.t('暂停', 'Pause') : this.t('开始', 'Start'))
-          .layoutWeight(2)
+          .layoutWeight(1)
           .height(54)
           .borderRadius(18)
           .fontColor(Color.White)
@@ -582,10 +666,22 @@ struct Index {
           .backgroundColor(this.timerRunning ? AppColor.Warning : AppColor.Good)
           .onClick(() => {
             if (this.timerRunning) {
-              this.stopTimer();
+              this.pauseFocusTimer();
             } else {
-              this.startTimer();
+              this.startFocusTimer();
             }
+          })
+
+        Button(this.t('自定义', 'Custom'))
+          .layoutWeight(1)
+          .height(54)
+          .borderRadius(18)
+          .fontColor(this.timerRunning ? AppColor.Muted : AppColor.Primary)
+          .fontWeight(FontWeight.Medium)
+          .backgroundColor(this.timerRunning ? AppColor.Surface : AppColor.PrimarySoft)
+          .enabled(!this.timerRunning)
+          .onClick(() => {
+            this.openDurationDialog();
           })
       }
       .width('100%')
@@ -597,6 +693,73 @@ struct Index {
       }
     }
     .width('100%')
+  }
+
+  /**
+   * 自定义专注时长弹窗
+   * 时/分/秒滚轮 + 取消 / 确定（蓝色高亮）
+   */
+  @Builder
+  FocusDurationDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#80000000')
+        .onClick(() => {
+          this.cancelDurationDialog();
+        })
+
+      Column({ space: 20 }) {
+        Text(this.t('自定义专注时长', 'Custom Focus Duration'))
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Text)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+
+        TimePicker({
+          selected: this.draftDurationDate,
+          format: TimePickerFormat.HOUR_MINUTE_SECOND
+        })
+          .useMilitaryTime(true)
+          .onChange((value: TimePickerResult) => {
+            if (value.hour >= 0) {
+              this.draftDurationDate = new Date(1970, 0, 1, value.hour, value.minute, value.second);
+            }
+          })
+
+        Row({ space: 12 }) {
+          Button(this.t('取消', 'Cancel'))
+            .layoutWeight(1)
+            .height(48)
+            .borderRadius(12)
+            .fontColor(AppColor.Muted)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.cancelDurationDialog();
+            })
+
+          Button(this.t('确定', 'Confirm'))
+            .layoutWeight(1)
+            .height(48)
+            .borderRadius(12)
+            .fontColor(Color.White)
+            .fontWeight(FontWeight.Bold)
+            .backgroundColor(AppColor.Primary)
+            .onClick(() => {
+              this.confirmDurationDialog();
+            })
+        }
+        .width('100%')
+      }
+      .padding(20)
+      .width('88%')
+      .backgroundColor(AppColor.White)
+      .borderRadius(20)
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /**
@@ -1291,7 +1454,7 @@ struct Index {
         .borderRadius(16)
         .backgroundColor(index === this.currentTab ? '#1A0054CB' : '#00FFFFFF')
         .onClick(() => {
-          this.currentTab = index;
+          this.switchTab(index);
         })
       })
     }
