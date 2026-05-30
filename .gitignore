@@ -1,0 +1,21 @@
+# DevEco / local IDE state
+.idea/
+*.iml
+local.properties
+
+# HarmonyOS / Hvigor generated files
+.hvigor/
+.appanalyzer/
+entry/build/
+entry/.preview/
+**/build/
+**/.preview/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# OS metadata
+.DS_Store
+Thumbs.db

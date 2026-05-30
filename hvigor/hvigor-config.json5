@@ -1,0 +1,36 @@
+/**
+ * hvigor-config.json5 - Hvigor 构建工具全局配置
+ *
+ * 定义 Hvigor 构建系统的运行时行为，包括：
+ * - 依赖管理策略
+ * - 构建执行参数
+ * - 日志级别配置
+ * - 调试选项
+ *
+ * 配置项说明：
+ * - modelVersion：Hvigor 配置模型版本
+ * - dependencies：全局依赖配置
+ * - execution：构建执行策略（如并行任务数、超时时间等）
+ * - logging：日志输出配置（level: debug/info/warn/error）
+ * - debugging：调试选项（stacktrace: true 可输出详细调用栈）
+ * - nodeOptions：Node.js 运行参数
+ */
+{
+  // Hvigor 配置模型版本号
+  "modelVersion": "6.1.0",
+  // 全局依赖声明
+  "dependencies": {
+  },
+  // 构建执行策略
+  "execution": {
+  },
+  // 日志配置（可设置 level 为 "debug" 查看详细构建日志）
+  "logging": {
+  },
+  // 调试配置（可设置 stacktrace: true 在构建失败时输出完整堆栈）
+  "debugging": {
+  },
+  // Node.js 运行时选项
+  "nodeOptions": {
+  }
+}

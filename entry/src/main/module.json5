@@ -1,0 +1,71 @@
+/**
+ * module.json5 - 模块级配置文件（Entry HAP 模块）
+ *
+ * 定义 HAP（Harmony Ability Package）模块的基础信息和 Ability 声明。
+ * 每个模块包含一个或多个 Ability，每个 Ability 代表一个可独立运行的界面单元。
+ *
+ * 关键配置项说明：
+ * - name：模块名称，用于标识模块
+ * - type：模块类型（entry=应用入口模块, feature=功能模块, shared=共享模块）
+ * - deviceTypes：支持的设备类型（phone 手机, tablet 平板, 2in1 二合一）
+ * - abilities：Ability 列表，声明应用的所有 Ability 组件
+ * - pages：页面路由配置文件引用（$profile 指向 resources/base/profile/ 目录）
+ * - mainElement：应用入口 Ability 名称
+ */
+{
+  "module": {
+    // 模块名称：entry 表示应用主模块
+    "name": "entry",
+    // 模块类型：entry 为应用入口模块，不可缺省
+    "type": "entry",
+    // 模块描述（引用 string.json 中的资源）
+    "description": "$string:module_desc",
+    // 应用主入口 Ability 名称，程序启动时首先加载的 Ability
+    "mainElement": "EntryAbility",
+    // 支持的设备类型列表
+    "deviceTypes": [
+      "phone",   // 手机设备
+      "tablet"   // 平板设备
+    ],
+    // 是否随应用安装一并部署
+    "deliveryWithInstall": true,
+    // 是否支持免安装（原子化服务）
+    "installationFree": false,
+    // 页面路由配置（引用 main_pages.json，$profile 指向 resources/base/profile/ 目录）
+    "pages": "$profile:main_pages",
+    // Ability 组件声明列表
+    "abilities": [
+      {
+        // Ability 名称，与 mainElement 对应
+        "name": "EntryAbility",
+        // Ability 源码入口文件路径
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        // Ability 描述（引用 string.json 中的资源）
+        "description": "$string:entryability_desc",
+        // 应用图标
+        "icon": "$media:app_icon",
+        // 应用名称标签（引用 string.json 中的资源）
+        "label": "$string:app_name",
+        // 启动页图标
+        "startWindowIcon": "$media:app_icon",
+        // 启动页背景色（引用 color.json 中的资源）
+        "startWindowBackground": "$color:background_main",
+        // 是否允许外部应用调用此 Ability
+        "exported": true,
+        // Intent 过滤器（skills），定义 Ability 能响应的系统行为
+        "skills": [
+          {
+            // 实体类型：home 表示桌面/主屏幕入口
+            "entities": [
+              "entity.system.home"
+            ],
+            // 动作类型：home 表示桌面启动动作
+            "actions": [
+              "action.system.home"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

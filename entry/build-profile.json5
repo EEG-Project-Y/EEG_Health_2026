@@ -1,0 +1,30 @@
+/**
+ * build-profile.json5 - 模块构建配置文件
+ *
+ * 定义模块级别的构建参数，包括编译目标、混淆配置等。
+ *
+ * 关键配置项：
+ * - apiType：API 模型类型，stageMode 使用 Stage 模型（推荐）
+ * - arkOptions：ArkTS 编译选项
+ *   - apPath：ArkTS 模块化配置文件路径，用于声明模块间依赖关系
+ * - targets：构建目标列表，可配置多个构建变体
+ */
+{
+  // API 模型类型：stageMode 使用 HarmonyOS Stage 模型
+  "apiType": "stageMode",
+  // 构建选项
+  "buildOption": {
+    // ArkTS 编译选项
+    "arkOptions": {
+      // ArkTS 模块归档路径，定义模块间 API 依赖关系
+      "apPath": "./modules.ap"
+    }
+  },
+  // 构建目标配置
+  "targets": [
+    {
+      // 默认构建目标（可添加 release/debug 等变体）
+      "name": "default"
+    }
+  ]
+}

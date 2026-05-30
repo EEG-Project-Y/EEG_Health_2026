@@ -1,0 +1,28 @@
+/**
+ * oh-package.json5 - 模块包描述文件
+ *
+ * 类似于 Node.js 的 package.json，描述模块的元信息和依赖关系。
+ * 三方库依赖在此文件中声明，通过 ohpm install 自动安装。
+ *
+ * 关键配置项：
+ * - name：模块名称
+ * - version：模块版本
+ * - dependencies：三方库依赖列表（键为包名，值为版本号）
+ */
+{
+  // 模块名称
+  "name": "entry",
+  // 模块版本
+  "version": "1.0.0",
+  // 模块描述
+  "description": "Main HarmonyOS entry module.",
+  // 入口文件（HAP 模块通常为空，使用 module.json5 中的 srcEntry）
+  "main": "",
+  // 作者信息
+  "author": "",
+  // 开源协议
+  "license": "Apache-2.0",
+  // 三方库依赖声明
+  // 格式："包名": "版本号"（如 "@ohos/axios": "^2.2.0"）
+  "dependencies": {}
+}

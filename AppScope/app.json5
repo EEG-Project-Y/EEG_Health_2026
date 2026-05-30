@@ -1,0 +1,28 @@
+/**
+ * app.json5 - 应用级全局配置文件
+ *
+ * 位于 AppScope 目录下，定义整个应用的标识信息和基本属性。
+ * 一个应用的所有模块共享此配置。
+ *
+ * 关键配置项：
+ * - bundleName：应用唯一标识（包名），格式为 com.公司名.应用名
+ * - versionCode：版本号（整数），用于应用商店版本比较
+ * - versionName：版本名称（字符串），面向用户显示
+ * - vendor：开发者/厂商名称
+ */
+{
+  "app": {
+    // 应用包名（Bundle Name），全局唯一标识
+    "bundleName": "com.stitch.healthmonitor",
+    // 供应商名称
+    "vendor": "stitch",
+    // 版本号（整数），每次发布需递增
+    "versionCode": 1000000,
+    // 版本名称（面向用户），遵循语义化版本规范
+    "versionName": "1.0.0",
+    // 应用图标资源引用
+    "icon": "$media:app_icon",
+    // 应用显示名称资源引用
+    "label": "$string:app_name"
+  }
+}

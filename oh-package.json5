@@ -1,0 +1,10 @@
+{
+  "modelVersion": "6.1.0",
+  "name": "stitch_harmonyos_ai_health_monitor",
+  "version": "1.0.0",
+  "description": "HarmonyOS ArkUI health monitor app converted from HTML prototypes.",
+  "main": "",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}

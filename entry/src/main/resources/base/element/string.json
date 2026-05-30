@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "HealthSync"
+    },
+    {
+      "name": "module_desc",
+      "value": "HealthSync AI health monitor entry module"
+    },
+    {
+      "name": "entryability_desc",
+      "value": "HealthSync main ability"
+    }
+  ]
+}
