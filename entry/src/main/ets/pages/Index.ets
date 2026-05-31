@@ -1,10 +1,9 @@
 import { BottomNav } from '../components/BottomNav';
-import { InputLike } from '../components/InputLike';
-import { MenuRow } from '../components/MenuRow';
 import { SummaryCard } from '../components/SummaryCard';
 import { TopBar } from '../components/TopBar';
 import { DataService, ToAppJson } from '../data/DataService';
 import { AppColor } from '../theme/AppColor';
+import { initSettingsStorage } from '../store/SettingsStore';
 
 /**
  * ============================================================================
@@ -18,20 +17,18 @@ import { AppColor } from '../theme/AppColor';
  * 页面架构（3 个 Tab 页签）：
  *   1. 仪表盘 (Dashboard)  - 健康状态总览、实时专注/疲劳指标、脑电频谱、AI 建议
  *   2. 专注    (Focus)       - 番茄钟计时器、实时专注数据、休息建议
- *   3. 个人    (Profile)     - 用户信息、设备管理、系统设置、背景样式切换
+ *   3. 个人    (Profile)     - 用户信息、健康统计
  *
  * 技术栈：
  *   - ArkTS 声明式 UI + @Component/@Builder 组件化架构
- *   - @State 组件内响应式状态（未使用 @StorageLink）
+ *   - @State 组件内响应式状态 + 部分设置用 @StorageLink 共享
  *   - 中英双语国际化支持（默认中文）
  *   - 自定义 AppColor 设计系统
  *
  * 文件结构（按 @Builder 顺序）：
  *   AppColor → Index struct → TopBar → DashboardPage → MetricCard
  *   → SpectrumCard → WaveRow → SuggestionCard → FocusPage → FocusDataCard
- *   → RestAdviceCard → Tag → ProfilePage
- *   → SummaryCard → MenuRow → SettingsPanel → LanguageSelector → InputLike
- *   → Toggle/Switch/Slider 组件 → BackgroundPicker → BackgroundOption → BottomNav
+ *   → RestAdviceCard → Tag → ProfilePage → SummaryCard → BottomNav
  *   → TabItem 辅助类
  */
 
@@ -82,25 +79,12 @@ struct Index {
   @State private showDurationDialog: boolean = false;
   /** 弹窗内滚轮选中的时长（时/分/秒映射为 Date） */
   @State private draftDurationDate: Date = new Date(1970, 0, 1, 0, 25, 0);
-  /** 是否启用设备自动重连 */
-  @State private autoReconnect: boolean = true;
-  /** 是否启用云端数据同步 */
-  @State private cloudSync: boolean = true;
-  /** 是否保持屏幕常亮 */
-  @State private keepScreenOn: boolean = false;
-  /** 专注警告阈值（百分比，低于此值触发提醒） */
-  @State private focusThreshold: number = 40;
-  /** 疲劳警告阈值（百分比，高于此值触发提醒） */
-  @State private fatigueThreshold: number = 80;
-  /** 背景样式索引：0=白色, 1=蓝色, 2=暖色 */
-  @State private bgStyle: number = 0;
-
   // ──────────────────────────────────────────────────────────────────────────
   // 语言设置（0=中文, 1=English，默认中文）
   // ──────────────────────────────────────────────────────────────────────────
 
   /** 当前语言：0=中文, 1=English */
-  @State private language: number = 0;
+  @StorageLink('language') private language: number = 0;
 
   // ──────────────────────────────────────────────────────────────────────────
   // 私有成员变量
@@ -139,6 +123,7 @@ struct Index {
    * 暂停番茄钟，防止页面销毁后仍计时
    */
   aboutToAppear(): void {
+    initSettingsStorage();
     this.dataService.startReceiving((data: ToAppJson) => {
       this.applyToAppJson(data);
     });
@@ -899,8 +884,8 @@ struct Index {
   // ==========================================================================
 
   /**
-   * 个人页面 - 用户中心 + 系统设置
-   * 包含：用户信息 → 今日/疲劳统计 → 菜单列表 → 设置面板 → 背景选择器
+   * 个人页面 - 用户中心 + 健康摘要
+   * 包含：用户信息 → 今日/疲劳统计
    */
   @Builder
   ProfilePage() {
@@ -940,21 +925,6 @@ struct Index {
         SummaryCard({ title: this.t('平均疲劳', 'Avg Fatigue'), value: this.summaryValue(1, this.fatigue.toString() + ' /100'), color: AppColor.Warning })
       }
 
-      // ── 功能菜单列表 ──
-      Column() {
-        MenuRow({ title: this.t('设备管理', 'Device Management'), subtitle: this.t('Orange Pi 已连接', 'Orange Pi connected'), color: AppColor.Primary })
-        MenuRow({ title: this.t('提醒阈值', 'Alert Thresholds'), subtitle: this.t('自定义疲劳提醒', 'Customize fatigue warning'), color: AppColor.Danger })
-        MenuRow({ title: this.t('背景样式', 'Background Style'), subtitle: this.t('纯色、渐变和预览', 'Solid, gradient and preview'), color: AppColor.Good })
-      }
-      .backgroundColor(AppColor.White)
-      .borderRadius(16)
-      .border({ width: 1, color: AppColor.Border })
-
-      // ── 设置面板 ──
-      this.SettingsPanel()
-
-      // ── 背景样式选择器 ──
-      this.BackgroundPicker()
     }
     .width('100%')
   }
@@ -971,284 +941,6 @@ struct Index {
    * @param subtitle - 副标题/当前状态
    * @param color    - 右箭头颜色
    */
-  // ==========================================================================
-  // @Builder 方法 - 设置面板
-  // ==========================================================================
-
-  /**
-   * 设置面板
-   * 包含：IP/端口配置 → 语言切换 → 自动重连开关 → 阈值滑块 → 云同步/常亮开关
-   */
-  @Builder
-  SettingsPanel() {
-    Column({ space: 12 }) {
-      Text(this.t('设置', 'Settings'))
-        .fontSize(18)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(AppColor.Text)
-        .width('100%')
-
-      // ── 服务器连接配置（IP + 端口）──
-      Row({ space: 10 }) {
-        InputLike({ label: this.t('IP地址', 'IP Address'), value: '192.168.1.100' })
-        InputLike({ label: this.t('端口', 'Port'), value: '5000' })
-      }
-
-      // ── 语言选择器 ──
-      this.LanguageSelector()
-
-      // ── 自动重连开关 ──
-      this.ToggleAutoReconnect()
-
-      // ── 专注/疲劳阈值滑块 ──
-      this.SliderFocusThreshold()
-      this.SliderFatigueThreshold()
-
-      // ── 云同步 + 屏幕常亮开关 ──
-      this.ToggleCloudSync()
-      this.ToggleKeepScreenOn()
-    }
-    .alignItems(HorizontalAlign.Start)
-    .padding(16)
-    .backgroundColor(AppColor.Card)
-    .borderRadius(16)
-    .border({ width: 1, color: AppColor.Border })
-  }
-
-  /**
-   * 语言选择器 - 中文/英文 二选一按钮组
-   * 选中状态高亮为主题色，未选中为灰色
-   */
-  @Builder
-  LanguageSelector() {
-    Row() {
-      Text(this.t('语言', 'Language'))
-        .fontSize(15)
-        .fontColor(AppColor.Text)
-      Blank()
-      Row({ space: 6 }) {
-        // 中文按钮
-        Button(this.t('中文', 'CN'))
-          .height(32)
-          .fontSize(12)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.language === 0 ? Color.White : AppColor.Text)
-          .backgroundColor(this.language === 0 ? AppColor.Primary : AppColor.Surface)
-          .borderRadius(16)
-          .padding({ left: 14, right: 14 })
-          .onClick(() => {
-            this.language = 0;
-          })
-        // 英文按钮
-        Button(this.t('EN', 'EN'))
-          .height(32)
-          .fontSize(12)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.language === 1 ? Color.White : AppColor.Text)
-          .backgroundColor(this.language === 1 ? AppColor.Primary : AppColor.Surface)
-          .borderRadius(16)
-          .padding({ left: 14, right: 14 })
-          .onClick(() => {
-            this.language = 1;
-          })
-      }
-    }
-    .width('100%')
-    .padding({ top: 4, bottom: 4 })
-  }
-
-  /**
-   * 模拟输入框（只读展示，不可编辑）
-   * @param label - 标签文字
-   * @param value - 显示的值
-   */
-  // ── 开关行组件 ──
-
-  /** 自动重连开关 */
-  @Builder
-  ToggleAutoReconnect() {
-    this.SwitchRow(this.t('自动重连', 'Auto reconnect'), this.autoReconnect)
-  }
-
-  /** 云同步开关 */
-  @Builder
-  ToggleCloudSync() {
-    this.SwitchRow(this.t('云同步', 'Cloud sync'), this.cloudSync)
-  }
-
-  /** 屏幕常亮开关 */
-  @Builder
-  ToggleKeepScreenOn() {
-    this.SwitchRow(this.t('保持屏幕常亮', 'Keep screen on'), this.keepScreenOn)
-  }
-
-  /**
-   * 通用开关行（标签 + Switch 组件）
-   * @param label   - 开关标签
-   * @param checked - 当前开关状态
-   */
-  @Builder
-  SwitchRow(label: string, checked: boolean) {
-    Row() {
-      Text(label)
-        .fontSize(15)
-        .fontColor(AppColor.Text)
-      Blank()
-      Toggle({ type: ToggleType.Switch, isOn: checked })
-        .selectedColor(AppColor.Primary)
-    }
-    .width('100%')
-    .padding({ top: 4, bottom: 4 })
-  }
-
-  /**
-   * 专注阈值滑块
-   * 范围 0-100%，使用内嵌样式（InSet）滑块
-   */
-  @Builder
-  SliderFocusThreshold() {
-    Column({ space: 8 }) {
-      Row() {
-        Text(this.t('专注阈值', 'Focus threshold'))
-          .fontSize(15)
-          .fontColor(AppColor.Text)
-        Blank()
-        Text(Math.round(this.focusThreshold).toString() + '%')
-          .fontSize(13)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Primary)
-      }
-      .width('100%')
-      Slider({
-        value: this.focusThreshold,
-        min: 0,
-        max: 100,
-        step: 1,
-        style: SliderStyle.InSet
-      })
-        .width('100%')
-        .blockColor(AppColor.Primary)
-        .trackColor(AppColor.PrimarySoft)
-        .selectedColor(AppColor.Primary)
-        .onChange((value: number) => {
-          this.focusThreshold = value;
-        })
-    }
-    .width('100%')
-  }
-
-  /**
-   * 疲劳阈值滑块
-   * 范围 0-100，超过阈值触发疲劳警告
-   */
-  @Builder
-  SliderFatigueThreshold() {
-    Column({ space: 8 }) {
-      Row() {
-        Text(this.t('疲劳阈值', 'Fatigue threshold'))
-          .fontSize(15)
-          .fontColor(AppColor.Text)
-        Blank()
-        Text(Math.round(this.fatigueThreshold).toString() + '/100')
-          .fontSize(13)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Danger)
-      }
-      .width('100%')
-      Slider({
-        value: this.fatigueThreshold,
-        min: 0,
-        max: 100,
-        step: 1,
-        style: SliderStyle.InSet
-      })
-        .width('100%')
-        .blockColor(AppColor.Danger)
-        .trackColor('#33FF4D4F')
-        .selectedColor(AppColor.Danger)
-        .onChange((value: number) => {
-          this.fatigueThreshold = value;
-        })
-    }
-    .width('100%')
-  }
-
-  // ==========================================================================
-  // @Builder 方法 - 背景样式选择器
-  // ==========================================================================
-
-  /**
-   * 背景样式选择器
-   * 提供三种预设背景主题：白色、蓝色、暖色
-   */
-  @Builder
-  BackgroundPicker() {
-    Column({ space: 14 }) {
-      // 预览区：显示当前选中样式的效果
-      Column({ space: 8 }) {
-        Text(this.t('健康同步', 'Health Sync'))
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Text)
-        Progress({ value: 74, total: 100, type: ProgressType.Linear })
-          .height(8)
-          .color(AppColor.Primary)
-      }
-      .width('78%')
-      .padding(18)
-      .borderRadius(16)
-      .backgroundColor('#CCFFFFFF')
-      .border({ width: 1, color: AppColor.Border })
-
-      // 颜色选项行
-      Row({ space: 10 }) {
-        this.BackgroundOption(this.t('白色', 'White'), '#FFFFFF', 0)
-        this.BackgroundOption(this.t('蓝色', 'Blue'), '#E0F2FF', 1)
-        this.BackgroundOption(this.t('暖色', 'Warm'), '#FFF3E0', 2)
-      }
-
-      // 应用按钮
-      Button(this.t('应用背景', 'Apply Background'))
-        .height(48)
-        .width('100%')
-        .borderRadius(12)
-        .fontColor(Color.White)
-        .fontWeight(FontWeight.Bold)
-        .backgroundColor(AppColor.Primary)
-    }
-    .alignItems(HorizontalAlign.Start)
-    .padding(16)
-    .backgroundColor(AppColor.Card)
-    .borderRadius(16)
-    .border({ width: 1, color: AppColor.Border })
-  }
-
-  /**
-   * 背景颜色选项
-   * 选中时显示主题色边框 + 文字加粗
-   * @param label - 颜色名称
-   * @param color - 背景色值
-   * @param index - 选项索引
-   */
-  @Builder
-  BackgroundOption(label: string, color: string, index: number) {
-    Column() {
-      Text(label)
-        .fontSize(12)
-        .fontColor(index === this.bgStyle ? AppColor.Primary : AppColor.Muted)
-        .fontWeight(index === this.bgStyle ? FontWeight.Bold : FontWeight.Regular)
-    }
-    .layoutWeight(1)
-    .height(72)
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor(color)
-    .borderRadius(14)
-    .border({ width: index === this.bgStyle ? 2 : 1, color: index === this.bgStyle ? AppColor.Primary : AppColor.Border })
-    .onClick(() => {
-      this.bgStyle = index;
-    })
-  }
-
   // ==========================================================================
   // @Builder 方法 - 底部导航栏
   // ==========================================================================

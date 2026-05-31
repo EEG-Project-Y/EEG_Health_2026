@@ -1,3 +1,4 @@
+import router from '@ohos.router';
 import { AppColor } from '../theme/AppColor';
 
 @Component
@@ -20,41 +21,32 @@ export struct TopBar {
 
   build() {
     Row() {
-      Text(this.currentTab === 2 ? 'HS' : 'AI')
-        .width(42)
-        .height(42)
-        .borderRadius(21)
-        .textAlign(TextAlign.Center)
-        .fontSize(14)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(AppColor.Primary)
-        .backgroundColor(AppColor.PrimarySoft)
-
-      Column() {
+      Column({ space: 2 }) {
         Text(this.currentTab === 0 ? this.t('早上好', 'Good morning') : this.t('健康同步', 'HealthSync'))
           .fontSize(12)
           .fontColor(AppColor.Muted)
         Text(this.getTabName(this.currentTab))
-          .fontSize(22)
+          .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Primary)
+          .fontColor(AppColor.Text)
       }
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 })
 
       Blank()
 
-      Button(this.t('提醒', 'Alert'))
-        .height(36)
-        .fontSize(13)
-        .fontColor(AppColor.Text)
+      Text(this.t('设置', 'Settings'))
+        .fontSize(12)
+        .fontColor(AppColor.Muted)
+        .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+        .borderRadius(12)
         .backgroundColor(AppColor.Surface)
-        .borderRadius(18)
+        .onClick(() => {
+          router.pushUrl({ url: 'pages/Settings' });
+        })
     }
     .width('100%')
-    .height(64)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor('#F9F9FFCC')
-    .shadow({ radius: 8, color: '#10000000', offsetY: 2 })
+    .height(56)
+    .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+    .backgroundColor(AppColor.White)
   }
 }
