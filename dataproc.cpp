@@ -4,6 +4,7 @@
 #include <cmath>
 #include <string>
 #include <sstream>
+#include <regex>
 
 using namespace std;
 
@@ -168,6 +169,59 @@ void saveTextFile(const string& filename, const string& content) {
     file.close();
 }
 
+bool extractFloatField(const string& content, const string& fieldName, float& value) {
+    regex fieldRegex("\"" + fieldName + "\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
+    smatch match;
+
+    if (!regex_search(content, match, fieldRegex)) {
+        return false;
+    }
+
+    try {
+        value = stof(match[1].str());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool extractIntField(const string& content, const string& fieldName, int& value) {
+    regex fieldRegex("\"" + fieldName + "\"\\s*:\\s*(-?[0-9]+)");
+    smatch match;
+
+    if (!regex_search(content, match, fieldRegex)) {
+        return false;
+    }
+
+    try {
+        value = stoi(match[1].str());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool loadOriginFromJson(const string& path, EEGInput& input) {
+    ifstream file(path);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    stringstream buffer;
+    buffer << file.rdbuf();
+    string content = buffer.str();
+
+    bool ok = true;
+    ok = extractFloatField(content, "delta", input.delta) && ok;
+    ok = extractFloatField(content, "theta", input.theta) && ok;
+    ok = extractFloatField(content, "alpha", input.alpha) && ok;
+    ok = extractFloatField(content, "beta", input.beta) && ok;
+    ok = extractIntField(content, "quality", input.quality) && ok;
+    ok = extractFloatField(content, "confidence", input.confidence) && ok;
+
+    return ok;
+}
+
 string processEEGData(const EEGInput& input) {
     EEGMetrics currentData = analyzeEEG(input);
 
@@ -198,13 +252,15 @@ string processEEGData(const EEGInput& input) {
 int main() {
     EEGInput input;
 
-    input.delta = 2.4f;
-    input.theta = 5.6f;
-    input.alpha = 12.3f;
-    input.beta = 8.1f;
+    if (!loadOriginFromJson("origin.json", input)) {
+        input.delta = 2.4f;
+        input.theta = 5.6f;
+        input.alpha = 12.3f;
+        input.beta = 8.1f;
 
-    input.quality = 85;
-    input.confidence = 0.85f;
+        input.quality = 85;
+        input.confidence = 0.85f;
+    }
 
     processEEGData(input);
 

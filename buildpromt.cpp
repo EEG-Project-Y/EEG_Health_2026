@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdio>
 #include <sstream>
+#include <fstream>
+#include <regex>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -13,6 +15,7 @@
 
 struct EEGAdviceInput {
     std::string state = "normal";
+    std::string direction = "";
 
     int focus = 0;
     int fatigue = 0;
@@ -41,6 +44,10 @@ std::string levelText(int value) {
 }
 
 std::string buildDirection(const EEGAdviceInput& input) {
+    if (!input.direction.empty()) {
+        return input.direction;
+    }
+
     if (input.quality < 50) {
         return "check_signal_or_adjust_device";
     }
@@ -252,6 +259,146 @@ std::string buildJson(const EEGAdviceInput& input, const std::string& advice) {
     return ss.str();
 }
 
+bool extractStringField(const std::string& content, const std::string& objectName,
+                        const std::string& fieldName, std::string& value) {
+    std::regex nestedRegex("\"" + objectName + "\"\\s*:\\s*\\{[^}]*\"" +
+                           fieldName + "\"\\s*:\\s*\"([^\"]*)\"");
+    std::smatch match;
+    if (std::regex_search(content, match, nestedRegex)) {
+        value = match[1].str();
+        return true;
+    }
+
+    std::regex flatRegex("\"" + fieldName + "\"\\s*:\\s*\"([^\"]*)\"");
+    if (std::regex_search(content, match, flatRegex)) {
+        value = match[1].str();
+        return true;
+    }
+
+    return false;
+}
+
+bool extractIntField(const std::string& content, const std::string& objectName,
+                     const std::string& fieldName, int& value) {
+    std::regex nestedRegex("\"" + objectName + "\"\\s*:\\s*\\{[^}]*\"" +
+                           fieldName + "\"\\s*:\\s*(-?[0-9]+)");
+    std::smatch match;
+    if (std::regex_search(content, match, nestedRegex)) {
+        value = std::stoi(match[1].str());
+        return true;
+    }
+
+    std::regex flatRegex("\"" + fieldName + "\"\\s*:\\s*(-?[0-9]+)");
+    if (std::regex_search(content, match, flatRegex)) {
+        value = std::stoi(match[1].str());
+        return true;
+    }
+
+    return false;
+}
+
+bool extractFloatField(const std::string& content, const std::string& objectName,
+                       const std::string& fieldName, float& value) {
+    std::regex nestedRegex("\"" + objectName + "\"\\s*:\\s*\\{[^}]*\"" +
+                           fieldName + "\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
+    std::smatch match;
+    if (std::regex_search(content, match, nestedRegex)) {
+        value = std::stof(match[1].str());
+        return true;
+    }
+
+    std::regex flatRegex("\"" + fieldName + "\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
+    if (std::regex_search(content, match, flatRegex)) {
+        value = std::stof(match[1].str());
+        return true;
+    }
+
+    return false;
+}
+
+bool loadCurrentDataFromJson(const std::string& path, EEGAdviceInput& input) {
+    std::ifstream inFile(path);
+    if (!inFile.is_open()) {
+        return false;
+    }
+
+    std::stringstream buffer;
+    buffer << inFile.rdbuf();
+    std::string content = buffer.str();
+
+    bool ok = true;
+    ok = extractStringField(content, "summary", "state", input.state) && ok;
+    extractStringField(content, "summary", "direction", input.direction);
+
+    ok = extractIntField(content, "metrics", "focus", input.focus) && ok;
+    ok = extractIntField(content, "metrics", "fatigue", input.fatigue) && ok;
+    ok = extractIntField(content, "metrics", "relax", input.relax) && ok;
+    ok = extractIntField(content, "metrics", "load", input.load) && ok;
+    ok = extractIntField(content, "metrics", "quality", input.quality) && ok;
+    ok = extractFloatField(content, "metrics", "confidence", input.confidence) && ok;
+
+    ok = extractIntField(content, "trend", "focus", input.focusTrend) && ok;
+    ok = extractIntField(content, "trend", "fatigue", input.fatigueTrend) && ok;
+    ok = extractIntField(content, "trend", "relax", input.relaxTrend) && ok;
+    ok = extractIntField(content, "trend", "load", input.loadTrend) && ok;
+
+    return ok;
+}
+
+int readOldSequenceFromToApp(const std::string& path) {
+    std::ifstream inFile(path);
+    if (!inFile.is_open()) {
+        return 0;
+    }
+
+    std::stringstream buffer;
+    buffer << inFile.rdbuf();
+
+    std::smatch match;
+    std::regex sequenceRegex("\"sequence\"\\s*:\\s*([0-9]+)");
+    std::string content = buffer.str();
+
+    if (!std::regex_search(content, match, sequenceRegex)) {
+        return 0;
+    }
+
+    try {
+        return std::stoi(match[1].str());
+    } catch (...) {
+        return 0;
+    }
+}
+
+std::string buildToAppJson(const std::string& json, int sequence) {
+    if (json.empty() || json[0] != '{') {
+        return json;
+    }
+
+    return "{\"sequence\":" + std::to_string(sequence) + "," + json.substr(1);
+}
+
+bool writeJsonAtomic(const std::string& path, const std::string& json) {
+    const std::string tmpPath = "ToApp.tmp";
+
+    std::ofstream outFile(tmpPath);
+    if (!outFile.is_open()) {
+        return false;
+    }
+
+    outFile << json << std::endl;
+    outFile.close();
+
+    if (!outFile) {
+        return false;
+    }
+
+#ifdef _WIN32
+    return MoveFileExA(tmpPath.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    return std::rename(tmpPath.c_str(), path.c_str()) == 0;
+#endif
+}
+
 std::string mockModelOutput(const EEGAdviceInput& input) {
     return fallbackAdvice(input) + " [end of text]";
 }
@@ -345,12 +492,24 @@ int main(int argc, char* argv[]) {
     SetConsoleCP(CP_UTF8);
 #endif
 
-    EEGAdviceInput input = parseInput(argc, argv);
+    EEGAdviceInput input;
+    if (!loadCurrentDataFromJson("currentData.json", input)) {
+        input = parseInput(argc, argv);
+    }
 
     std::string rawOutput = runModel(input);
     std::string advice = cleanOutput(rawOutput, input);
 
-    std::cout << buildJson(input, advice) << std::endl;
+    std::string json = buildJson(input, advice);
+    int newSequence = readOldSequenceFromToApp("ToApp.json") + 1;
+    if (newSequence <= 0) {
+        newSequence = 1;
+    }
+
+    std::string toAppJson = buildToAppJson(json, newSequence);
+    writeJsonAtomic("ToApp.json", toAppJson);
+
+    std::cout << toAppJson << std::endl;
 
     return 0;
 }
