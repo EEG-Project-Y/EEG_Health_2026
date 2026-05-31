@@ -33,6 +33,11 @@
     "installationFree": false,
     // 页面路由配置（引用 main_pages.json，$profile 指向 resources/base/profile/ 目录）
     "pages": "$profile:main_pages",
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      }
+    ],
     // Ability 组件声明列表
     "abilities": [
       {

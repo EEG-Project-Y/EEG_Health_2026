@@ -1,3 +1,11 @@
+import { BottomNav } from '../components/BottomNav';
+import { InputLike } from '../components/InputLike';
+import { MenuRow } from '../components/MenuRow';
+import { SummaryCard } from '../components/SummaryCard';
+import { TopBar } from '../components/TopBar';
+import { DataService, ToAppJson } from '../data/DataService';
+import { AppColor } from '../theme/AppColor';
+
 /**
  * ============================================================================
  * Index.ets - HealthSync AI 健康监测应用主页面
@@ -28,35 +36,6 @@
  *   → TabItem 辅助类
  */
 
-// ============================================================================
-// AppColor - 应用全局颜色设计系统
-// ============================================================================
-// 定义统一的色板常量，确保全应用视觉风格一致
-class AppColor {
-  /** 主题色 - 深蓝，用于按钮、链接、选中状态等 */
-  static readonly Primary: string = '#0054CB';
-  /** 主题色浅色版 - 淡蓝，用于背景高亮、图标底色 */
-  static readonly PrimarySoft: string = '#DAE2FF';
-  /** 表面色 - 浅灰蓝，用于卡片背景、区域底色 */
-  static readonly Surface: string = '#F9F9FF';
-  /** 卡片色 - 浅灰，用于内容区卡片 */
-  static readonly Card: string = '#F8F9FC';
-  /** 纯白色 */
-  static readonly White: string = '#FFFFFF';
-  /** 主文字色 - 深灰黑 */
-  static readonly Text: string = '#0F1C2F';
-  /** 次要文字色 - 中灰，用于副标题、说明文字 */
-  static readonly Muted: string = '#556477';
-  /** 边框色 - 浅灰 */
-  static readonly Border: string = '#EBEDEF';
-  /** 正向色 - 绿色，用于正常/良好状态指标 */
-  static readonly Good: string = '#2DC973';
-  /** 警告色 - 橙色 */
-  static readonly Warning: string = '#FF8A4C';
-  /** 危险色 - 红色，用于警告/异常状态 */
-  static readonly Danger: string = '#FF4D4F';
-}
-
 /** 番茄钟默认时长（25 分钟），与 Progress 环 total 默认值一致 */
 const DEFAULT_FOCUS_SEC: number = 1500;
 /** 自定义专注时长上限（24 小时） */
@@ -75,9 +54,23 @@ struct Index {
   /** 当前选中的标签页索引：0=仪表盘, 1=专注, 2=运动, 3=个人 */
   @State private currentTab: number = 0;
   /** 专注指数 (0-100)，从脑电数据实时计算 */
-  @State private focusScore: number = 88;
+  @State private focus: number = 88;
   /** 疲劳指数 (0-100)，数值越高越疲劳 */
-  @State private fatigueScore: number = 78;
+  @State private fatigue: number = 78;
+  @State private relax: number = 0;
+  @State private load: number = 0;
+  @State private quality: number = 0;
+  @State private confidence: number = 0;
+  @State private focusTrend: number = 0;
+  @State private fatigueTrend: number = 0;
+  @State private relaxTrend: number = 0;
+  @State private loadTrend: number = 0;
+  @State private state: string = 'normal';
+  @State private eegDirection: string = '';
+  @State private advice: string = '';
+  @State private local: boolean = true;
+  @State private model: string = '';
+  @State private summary: string[] = [];
   /** 番茄钟剩余秒数（默认 25 分钟） */
   @State private timerSeconds: number = DEFAULT_FOCUS_SEC;
   /** 番茄钟设定的总时长（秒），可由自定义弹窗修改 */
@@ -114,6 +107,7 @@ struct Index {
 
   /** 番茄钟 setTimeout 链 ID（-1 表示无待执行 tick） */
   private focusTimerId: number = -1;
+  private dataService: DataService = new DataService();
   /** 脑电频谱模拟数据（实时波柱高度数组） */
   private barValues: number[] = [32, 46, 24, 60, 36, 72, 28, 52, 42, 66, 34, 48];
 
@@ -137,15 +131,6 @@ struct Index {
    * @param index - Tab 索引 (0-3)
    * @returns 对应语言的标签名
    */
-  private getTabName(index: number): string {
-    if (this.language === 0) {
-      const zhNames: string[] = ['仪表盘', '专注', '运动', '个人'];
-      return zhNames[index];
-    }
-    const enNames: string[] = ['Dashboard', 'Focus', 'Sports', 'Profile'];
-    return enNames[index];
-  }
-
   // ==========================================================================
   // 生命周期方法
   // ==========================================================================
@@ -154,7 +139,33 @@ struct Index {
    * 组件即将销毁时调用
    * 暂停番茄钟，防止页面销毁后仍计时
    */
+  aboutToAppear(): void {
+    this.dataService.startReceiving((data: ToAppJson) => {
+      this.applyToAppJson(data);
+    });
+  }
+
+  private applyToAppJson(data: ToAppJson): void {
+    this.focus = data.focus ?? this.focus;
+    this.fatigue = data.fatigue ?? this.fatigue;
+    this.relax = data.relax ?? this.relax;
+    this.load = data.load ?? this.load;
+    this.quality = data.quality ?? this.quality;
+    this.confidence = data.confidence ?? this.confidence;
+    this.focusTrend = data.focusTrend ?? this.focusTrend;
+    this.fatigueTrend = data.fatigueTrend ?? this.fatigueTrend;
+    this.relaxTrend = data.relaxTrend ?? this.relaxTrend;
+    this.loadTrend = data.loadTrend ?? this.loadTrend;
+    this.state = data.state ?? this.state;
+    this.eegDirection = data.direction ?? this.eegDirection;
+    this.advice = data.advice ?? this.advice;
+    this.local = data.local ?? this.local;
+    this.model = data.model ?? this.model;
+    this.summary = data.summary ?? this.summary;
+  }
+
   aboutToDisappear(): void {
+    this.dataService.stopReceiving();
     this.pauseFocusTimer();
   }
 
@@ -177,7 +188,7 @@ struct Index {
       }
       this.timerSeconds -= 1;
       if (this.timerSeconds > 0 && this.timerSeconds % 3 === 0) {
-        this.focusScore = this.focusScore >= 94 ? 86 : this.focusScore + 1;
+        this.focus = this.focus >= 94 ? 86 : this.focus + 1;
       }
       if (this.timerRunning) {
         this.scheduleFocusTick();
@@ -210,7 +221,7 @@ struct Index {
   private resetFocusTimer(): void {
     this.pauseFocusTimer();
     this.timerSeconds = this.focusDurationSec;
-    this.focusScore = 88;
+    this.focus = 88;
   }
 
   /** 将秒数转为 TimePicker 用的 Date（1970-01-01 HH:mm:ss） */
@@ -289,7 +300,7 @@ struct Index {
     Stack({ alignContent: Alignment.Bottom }) {
       // ── 主内容区 ──
       Column() {
-        this.TopBar()                          // 顶部栏（用户信息 + 操作按钮）
+        TopBar({ currentTab: this.currentTab, language: this.language })
 
         Scroll() {                              // 可滚动内容区域
           Column({ space: 16 }) {
@@ -315,7 +326,13 @@ struct Index {
       .backgroundColor(AppColor.White)
 
       // ── 固定在底部的导航栏 ──
-      this.BottomNav()
+      BottomNav({
+        currentTab: this.currentTab,
+        language: this.language,
+        onTabChange: (index: number) => {
+          this.switchTab(index);
+        }
+      })
 
       if (this.showDurationDialog) {
         Stack() {
@@ -340,50 +357,6 @@ struct Index {
    * 包含：AI 图标 → 问候语/App名称 → Tab名称 → 操作按钮
    * 背景带毛玻璃效果（半透明 + 阴影）
    */
-  @Builder
-  TopBar() {
-    Row() {
-      // 左侧：AI/HS 圆形图标
-      Text(this.currentTab === 3 ? 'HS' : 'AI')
-        .width(42)
-        .height(42)
-        .borderRadius(21)
-        .textAlign(TextAlign.Center)
-        .fontSize(14)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(AppColor.Primary)
-        .backgroundColor(AppColor.PrimarySoft)
-
-      // 中间：上行为问候语，下行为当前页面标题
-      Column() {
-        Text(this.currentTab === 0 ? this.t('早上好', 'Good morning') : this.t('健康同步', 'HealthSync'))
-          .fontSize(12)
-          .fontColor(AppColor.Muted)
-        Text(this.getTabName(this.currentTab))
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Primary)
-      }
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 })
-
-      Blank()  // 弹性空白，将按钮推到右侧
-
-      // 右侧：操作按钮（运动页=开始，其他页=提醒）
-      Button(this.currentTab === 2 ? this.t('开始', 'Start') : this.t('提醒', 'Alert'))
-        .height(36)
-        .fontSize(13)
-        .fontColor(this.currentTab === 2 ? Color.White : AppColor.Text)
-        .backgroundColor(this.currentTab === 2 ? AppColor.Danger : AppColor.Surface)
-        .borderRadius(18)
-    }
-    .width('100%')
-    .height(64)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor('#F9F9FFCC')  // 半透明白色毛玻璃效果
-    .shadow({ radius: 8, color: '#10000000', offsetY: 2 })
-  }
-
   // ==========================================================================
   // @Builder 方法 - 仪表盘页面（Dashboard）
   // ==========================================================================
@@ -435,8 +408,8 @@ struct Index {
         )
         // 疲劳指数卡片
         this.MetricCard(
-          this.t('疲劳指数', 'Fatigue Index'), this.fatigueScore.toString(), '/100',
-          AppColor.Danger, this.t('休息5分钟', 'Rest for 5 minutes'), this.fatigueScore
+          this.t('疲劳指数', 'Fatigue Index'), this.fatigue.toString(), '/100',
+          AppColor.Danger, this.t('休息5分钟', 'Rest for 5 minutes'), this.fatigue
         )
       }
 
@@ -776,7 +749,7 @@ struct Index {
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Text)
         Blank()
-        Text(this.focusScore.toString() + '%')
+        Text(this.focus.toString() + '%')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Primary)
@@ -784,7 +757,7 @@ struct Index {
       .width('100%')
 
       // 进度条
-      Progress({ value: this.focusScore, total: 100, type: ProgressType.Linear })
+      Progress({ value: this.focus, total: 100, type: ProgressType.Linear })
         .height(8)
         .color(AppColor.Primary)
 
@@ -1036,27 +1009,15 @@ struct Index {
 
       // ── 统计汇总卡片（今日专注 + 平均疲劳）──
       Row({ space: 12 }) {
-        this.SummaryCard(this.t('今日专注', 'Today Focus'), '2h 30m', AppColor.Primary)
-        this.SummaryCard(this.t('平均疲劳', 'Avg Fatigue'), '45 /100', AppColor.Warning)
+        SummaryCard({ title: this.t('今日专注', 'Today Focus'), value: '2h 30m', color: AppColor.Primary })
+        SummaryCard({ title: this.t('平均疲劳', 'Avg Fatigue'), value: '45 /100', color: AppColor.Warning })
       }
 
       // ── 功能菜单列表 ──
       Column() {
-        this.MenuRow(
-          this.t('设备管理', 'Device Management'),
-          this.t('Orange Pi 已连接', 'Orange Pi connected'),
-          AppColor.Primary
-        )
-        this.MenuRow(
-          this.t('提醒阈值', 'Alert Thresholds'),
-          this.t('自定义疲劳提醒', 'Customize fatigue warning'),
-          AppColor.Danger
-        )
-        this.MenuRow(
-          this.t('背景样式', 'Background Style'),
-          this.t('纯色、渐变和预览', 'Solid, gradient and preview'),
-          AppColor.Good
-        )
+        MenuRow({ title: this.t('设备管理', 'Device Management'), subtitle: this.t('Orange Pi 已连接', 'Orange Pi connected'), color: AppColor.Primary })
+        MenuRow({ title: this.t('提醒阈值', 'Alert Thresholds'), subtitle: this.t('自定义疲劳提醒', 'Customize fatigue warning'), color: AppColor.Danger })
+        MenuRow({ title: this.t('背景样式', 'Background Style'), subtitle: this.t('纯色、渐变和预览', 'Solid, gradient and preview'), color: AppColor.Good })
       }
       .backgroundColor(AppColor.White)
       .borderRadius(16)
@@ -1077,55 +1038,12 @@ struct Index {
    * @param value - 核心数值
    * @param color - 数值颜色
    */
-  @Builder
-  SummaryCard(title: string, value: string, color: string) {
-    Column() {
-      Text(title)
-        .fontSize(12)
-        .fontColor(AppColor.Muted)
-      Blank()
-      Text(value)
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(color)
-    }
-    .alignItems(HorizontalAlign.Start)
-    .layoutWeight(1)
-    .height(122)
-    .padding(14)
-    .backgroundColor(AppColor.Card)
-    .borderRadius(16)
-    .border({ width: 1, color: AppColor.Border })
-  }
-
   /**
    * 菜单行（含标题 + 副标题 + 右箭头）
    * @param title    - 主标题
    * @param subtitle - 副标题/当前状态
    * @param color    - 右箭头颜色
    */
-  @Builder
-  MenuRow(title: string, subtitle: string, color: string) {
-    Row() {
-      Column({ space: 4 }) {
-        Text(title)
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(AppColor.Text)
-        Text(subtitle)
-          .fontSize(12)
-          .fontColor(AppColor.Muted)
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      Text('>')
-        .fontSize(22)
-        .fontColor(color)
-    }
-    .padding(16)
-    .width('100%')
-  }
-
   // ==========================================================================
   // @Builder 方法 - 设置面板
   // ==========================================================================
@@ -1145,8 +1063,8 @@ struct Index {
 
       // ── 服务器连接配置（IP + 端口）──
       Row({ space: 10 }) {
-        this.InputLike(this.t('IP地址', 'IP Address'), '192.168.1.100')
-        this.InputLike(this.t('端口', 'Port'), '5000')
+        InputLike({ label: this.t('IP地址', 'IP Address'), value: '192.168.1.100' })
+        InputLike({ label: this.t('端口', 'Port'), value: '5000' })
       }
 
       // ── 语言选择器 ──
@@ -1217,25 +1135,6 @@ struct Index {
    * @param label - 标签文字
    * @param value - 显示的值
    */
-  @Builder
-  InputLike(label: string, value: string) {
-    Column({ space: 6 }) {
-      Text(label)
-        .fontSize(12)
-        .fontColor(AppColor.Muted)
-      Text(value)
-        .fontSize(14)
-        .fontColor(AppColor.Text)
-        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-        .width('100%')
-        .borderRadius(10)
-        .backgroundColor(AppColor.White)
-        .border({ width: 1, color: AppColor.Border })
-    }
-    .layoutWeight(1)
-    .alignItems(HorizontalAlign.Start)
-  }
-
   // ── 开关行组件 ──
 
   /** 自动重连开关 */
@@ -1432,77 +1331,8 @@ struct Index {
    * 带毛玻璃效果背景，选中态为主题色高亮
    * Tab 图标：D=仪表盘, F=专注, S=运动, P=个人
    */
-  @Builder
-  BottomNav() {
-    Row() {
-      ForEach(this.getTabItems(), (item: TabItem, index: number) => {
-        Column({ space: 4 }) {
-          // Tab 图标（首字母）
-          Text(item.icon)
-            .fontSize(16)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(index === this.currentTab ? AppColor.Primary : AppColor.Muted)
-          // Tab 名称
-          Text(item.name)
-            .fontSize(12)
-            .fontWeight(index === this.currentTab ? FontWeight.Bold : FontWeight.Medium)
-            .fontColor(index === this.currentTab ? AppColor.Primary : AppColor.Muted)
-        }
-        .layoutWeight(1)        // 均分宽度
-        .height(54)
-        .justifyContent(FlexAlign.Center)
-        .borderRadius(16)
-        .backgroundColor(index === this.currentTab ? '#1A0054CB' : '#00FFFFFF')
-        .onClick(() => {
-          this.switchTab(index);
-        })
-      })
-    }
-    .height(82)
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 8, bottom: 12 })
-    .backgroundColor('#F9F9FFEE')  // 毛玻璃：半透明白色
-    .border({ width: { top: 1 }, color: AppColor.Border })
-  }
-
   /**
    * 获取导航栏 Tab 项列表（支持中英双语）
    * @returns 根据当前语言返回对应的 TabItem 数组
    */
-  private getTabItems(): TabItem[] {
-    if (this.language === 0) {
-      return [
-        new TabItem('D', '仪表盘'),
-        new TabItem('F', '专注'),
-        new TabItem('S', '运动'),
-        new TabItem('P', '个人')
-      ];
-    }
-    return [
-      new TabItem('D', 'Dashboard'),
-      new TabItem('F', 'Focus'),
-      new TabItem('S', 'Sports'),
-      new TabItem('P', 'Profile')
-    ];
-  }
-}
-
-// ============================================================================
-// TabItem - 导航栏 Tab 项数据模型
-// ============================================================================
-
-/**
- * 底部导航栏项数据类
- * 用于 ForEach 渲染导航栏按钮
- */
-class TabItem {
-  /** Tab 图标（首字母） */
-  icon: string;
-  /** Tab 名称 */
-  name: string;
-
-  constructor(icon: string, name: string) {
-    this.icon = icon;
-    this.name = name;
-  }
 }
