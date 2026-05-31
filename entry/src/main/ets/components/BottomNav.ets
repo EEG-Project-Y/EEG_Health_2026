@@ -3,8 +3,8 @@ import { AppColor } from '../theme/AppColor';
 
 @Component
 export struct BottomNav {
-  currentTab: number = 0;
-  language: number = 0;
+  @Prop currentTab: number = 0;
+  @Prop language: number = 0;
   onTabChange: (index: number) => void = (index: number) => {};
 
   private getTabItems(): TabItem[] {
@@ -12,14 +12,12 @@ export struct BottomNav {
       return [
         new TabItem('D', '仪表盘'),
         new TabItem('F', '专注'),
-        new TabItem('S', '运动'),
         new TabItem('P', '个人')
       ];
     }
     return [
       new TabItem('D', 'Dashboard'),
       new TabItem('F', 'Focus'),
-      new TabItem('S', 'Sports'),
       new TabItem('P', 'Profile')
     ];
   }

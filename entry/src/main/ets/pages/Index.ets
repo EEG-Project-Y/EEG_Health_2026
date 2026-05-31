@@ -13,13 +13,12 @@ import { AppColor } from '../theme/AppColor';
  *
  * 功能概述：
  *   基于 HarmonyOS ArkUI 框架构建的 AI 健康监测应用主界面，
- *   提供脑电(EEG)数据分析、专注计时、运动追踪等核心功能。
+ *   提供脑电(EEG)数据分析、专注计时和个人设置等核心功能。
  *
- * 页面架构（4 个 Tab 页签）：
+ * 页面架构（3 个 Tab 页签）：
  *   1. 仪表盘 (Dashboard)  - 健康状态总览、实时专注/疲劳指标、脑电频谱、AI 建议
  *   2. 专注    (Focus)       - 番茄钟计时器、实时专注数据、休息建议
- *   3. 运动    (Sports)      - 心率/步频/卡路里监测、专注状态、路线预览
- *   4. 个人    (Profile)     - 用户信息、设备管理、系统设置、背景样式切换
+ *   3. 个人    (Profile)     - 用户信息、设备管理、系统设置、背景样式切换
  *
  * 技术栈：
  *   - ArkTS 声明式 UI + @Component/@Builder 组件化架构
@@ -30,7 +29,7 @@ import { AppColor } from '../theme/AppColor';
  * 文件结构（按 @Builder 顺序）：
  *   AppColor → Index struct → TopBar → DashboardPage → MetricCard
  *   → SpectrumCard → WaveRow → SuggestionCard → FocusPage → FocusDataCard
- *   → RestAdviceCard → Tag → SportsPage → SportMetric → ProfilePage
+ *   → RestAdviceCard → Tag → ProfilePage
  *   → SummaryCard → MenuRow → SettingsPanel → LanguageSelector → InputLike
  *   → Toggle/Switch/Slider 组件 → BackgroundPicker → BackgroundOption → BottomNav
  *   → TabItem 辅助类
@@ -51,7 +50,7 @@ struct Index {
   // 状态变量（@State 响应式数据，变化时自动触发 UI 更新）
   // ──────────────────────────────────────────────────────────────────────────
 
-  /** 当前选中的标签页索引：0=仪表盘, 1=专注, 2=运动, 3=个人 */
+  /** 当前选中的标签页索引：0=仪表盘, 1=专注, 2=个人 */
   @State private currentTab: number = 0;
   /** 专注指数 (0-100)，从脑电数据实时计算 */
   @State private focus: number = 88;
@@ -85,7 +84,7 @@ struct Index {
   @State private autoReconnect: boolean = true;
   /** 是否启用云端数据同步 */
   @State private cloudSync: boolean = true;
-  /** 是否保持屏幕常亮（运动模式下默认关闭） */
+  /** 是否保持屏幕常亮 */
   @State private keepScreenOn: boolean = false;
   /** 专注警告阈值（百分比，低于此值触发提醒） */
   @State private focusThreshold: number = 40;
@@ -128,7 +127,7 @@ struct Index {
 
   /**
    * 获取指定 Tab 页签的翻译名称
-   * @param index - Tab 索引 (0-3)
+   * @param index - Tab 索引 (0-2)
    * @returns 对应语言的标签名
    */
   // ==========================================================================
@@ -309,8 +308,6 @@ struct Index {
               this.DashboardPage()
             } else if (this.currentTab === 1) {
               this.FocusPage()
-            } else if (this.currentTab === 2) {
-              this.SportsPage()
             } else {
               this.ProfilePage()
             }
@@ -837,137 +834,6 @@ struct Index {
   }
 
   // ==========================================================================
-  // @Builder 方法 - 运动页面（Sports）
-  // ==========================================================================
-
-  /**
-   * 运动页面 - 实时运动数据追踪
-   * 包含：横向滚动指标卡 → 专注状态环 → 路线预览 → 饮水提示
-   */
-  @Builder
-  SportsPage() {
-    Column({ space: 18 }) {
-      // ── 横向滚动的运动指标 ──
-      Scroll() {
-        Row({ space: 12 }) {
-          this.SportMetric(this.t('心率', 'Heart Rate'), '142', this.t('次/分', 'bpm'), AppColor.Danger)
-          this.SportMetric(this.t('步频', 'Cadence'), '184', this.t('步/分', 'spm'), AppColor.Primary)
-          this.SportMetric(this.t('卡路里', 'Calories'), '342', this.t('千卡', 'kcal'), AppColor.Warning)
-        }
-        .padding({ right: 16 })
-      }
-      .scrollable(ScrollDirection.Horizontal)
-      .scrollBar(BarState.Off)
-
-      // ── 专注状态环形图 ──
-      Column({ space: 8 }) {
-        Text(this.t('专注状态', 'Focus State'))
-          .fontSize(12)
-          .fontColor(AppColor.Muted)
-        Stack() {
-          Progress({ value: 88, total: 100, type: ProgressType.Ring })
-            .width(250)
-            .height(250)
-            .color(AppColor.Primary)
-          Column({ space: 4 }) {
-            Text('88')
-              .fontSize(52)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(AppColor.Text)
-            Text(this.t('+5 专注指数', '+5 Focus Index'))
-              .fontSize(12)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(AppColor.Good)
-          }
-        }
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Center)
-
-      // ── 路线预览区域 ──
-      Column({ space: 8 }) {
-        Text(this.t('路线预览', 'Route Preview'))
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(AppColor.Muted)
-        Stack() {
-          // 模拟地图水印
-          Text(this.t('地图', 'MAP'))
-            .fontSize(28)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(AppColor.Primary)
-            .opacity(0.28)
-          // 路线追踪状态标签
-          Text(this.t('追踪运动路线', 'Tracking workout route'))
-            .fontSize(13)
-            .fontColor(AppColor.Primary)
-            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-            .borderRadius(16)
-            .backgroundColor('#1A0054CB')
-            .margin({ top: 96 })
-        }
-        .height(196)
-        .width('100%')
-        .backgroundColor(AppColor.Surface)
-        .borderRadius(16)
-        .border({ width: 1, color: AppColor.Border })
-      }
-      .alignItems(HorizontalAlign.Start)
-
-      // ── 饮水提醒 ──
-      Row({ space: 12 }) {
-        Text('H2O')
-          .width(42)
-          .height(38)
-          .borderRadius(10)
-          .textAlign(TextAlign.Center)
-          .fontColor(AppColor.Primary)
-          .fontWeight(FontWeight.Bold)
-          .backgroundColor(AppColor.PrimarySoft)
-        Text(this.t('保持节奏，记得喝水。', 'Keep your pace and drink water.'))
-          .fontSize(14)
-          .fontColor(AppColor.Muted)
-      }
-      .width('100%')
-      .padding(16)
-      .backgroundColor(AppColor.Surface)
-      .borderRadius(16)
-    }
-  }
-
-  /**
-   * 运动指标卡片（支持横向滚动）
-   * @param title - 指标名称
-   * @param value - 当前数值
-   * @param unit  - 单位
-   * @param color - 主题色
-   */
-  @Builder
-  SportMetric(title: string, value: string, unit: string, color: string) {
-    Column({ space: 8 }) {
-      Text(title)
-        .fontSize(12)
-        .fontColor(AppColor.Muted)
-      Row({ space: 4 }) {
-        Text(value)
-          .fontSize(28)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Text)
-        Text(unit)
-          .fontSize(11)
-          .fontColor(color)
-      }
-      .alignItems(VerticalAlign.Bottom)
-    }
-    .alignItems(HorizontalAlign.Start)
-    .width(152)
-    .padding(14)
-    .borderRadius(16)
-    .backgroundColor(AppColor.Card)
-    .border({ width: 1, color: AppColor.Border })
-  }
-
-  // ==========================================================================
   // @Builder 方法 - 个人页面（Profile）
   // ==========================================================================
 
@@ -1327,9 +1193,9 @@ struct Index {
   // ==========================================================================
 
   /**
-   * 底部导航栏（4 个 Tab）
+   * 底部导航栏（3 个 Tab）
    * 带毛玻璃效果背景，选中态为主题色高亮
-   * Tab 图标：D=仪表盘, F=专注, S=运动, P=个人
+   * Tab 图标：D=仪表盘, F=专注, P=个人
    */
   /**
    * 获取导航栏 Tab 项列表（支持中英双语）

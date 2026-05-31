@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\opcomd\\.ohos\\config\\default_stitch_harmonyos_ai_health_monitor_BULKmwYNpbaY-0O3-QcYmOnBT-tx07YAPoX0RHkkoxg=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B3F2883B2360923C7E57A4E38815B3452E0E75B056A000C0461C3E537E92288BCC57DA8670B89B7",
+          "profile": "C:\\Users\\opcomd\\.ohos\\config\\default_stitch_harmonyos_ai_health_monitor_BULKmwYNpbaY-0O3-QcYmOnBT-tx07YAPoX0RHkkoxg=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\opcomd\\.ohos\\config\\default_stitch_harmonyos_ai_health_monitor_BULKmwYNpbaY-0O3-QcYmOnBT-tx07YAPoX0RHkkoxg=.p12",
+          "storePassword": "0000001B7FC5341C05EB7425A5CB71E6399E2B14E9DB4DF653B9E068BB8636AE80600D18F6B5B4EF4FEBD6"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
