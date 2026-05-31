@@ -1,5 +1,8 @@
 import { http } from '@kit.NetworkKit';
-import { AppConfig } from '../config/config';
+import defaultToAppJson from './ToApp.json';
+
+const POLL_INTERVAL_MS: number = 1000;
+const TO_APP_ENDPOINT: string = '';
 
 export interface ToAppJson {
   focus?: number;
@@ -24,14 +27,14 @@ export type ToAppJsonCallback = (data: ToAppJson) => void;
 
 export class DataService {
   private timerId: number = -1;
-  private readonly endpoint: string = `${AppConfig.backendUrl}/api/eeg`;
+  private readonly endpoint: string = TO_APP_ENDPOINT;
 
   startReceiving(callback: ToAppJsonCallback): void {
     this.stopReceiving();
     this.fetchToAppJson(callback);
     this.timerId = setInterval(() => {
       this.fetchToAppJson(callback);
-    }, 2000);
+    }, POLL_INTERVAL_MS);
   }
 
   stopReceiving(): void {
@@ -42,6 +45,11 @@ export class DataService {
   }
 
   private fetchToAppJson(callback: ToAppJsonCallback): void {
+    if (this.endpoint.length === 0) {
+      callback(defaultToAppJson as ToAppJson);
+      return;
+    }
+
     const request = http.createHttp();
     try {
       request.request(

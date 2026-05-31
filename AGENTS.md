@@ -25,7 +25,8 @@
 - `entry/src/main/ets/pages/Index.ets`：主页面和大部分业务 UI，采用单页四 Tab 架构。
 - `entry/src/main/ets/components/`：可复用 UI 组件，例如 `BottomNav`、`TopBar`、`InputLike`、`MenuRow`、`SummaryCard`。
 - `entry/src/main/ets/theme/AppColor.ets`：应用颜色系统。
-- `entry/src/main/ets/data/DataService.ts`：后端 EEG 数据轮询服务。
+- `entry/src/main/ets/data/DataService.ts`：ToApp 数据轮询服务，负责读取/解析 `ToAppJson` 并回调页面状态更新。
+- `entry/src/main/ets/data/ToApp.json`：当前默认数据源。完整后端尚未接入时，前端以该文件内容作为默认实时数据。
 - `entry/src/main/ets/config/config.ts`：后端地址配置。
 - `entry/src/main/resources/base/profile/main_pages.json`：页面路由注册，新增页面时需要同步注册。
 
@@ -40,11 +41,13 @@
 
 ## 数据与网络
 
-- 后端地址在 `entry/src/main/ets/config/config.ts` 中配置：
-  - `backendUrl: 'http://192.168.1.100:5000'`
-- `DataService` 每 2 秒请求一次 `${AppConfig.backendUrl}/api/eeg`。
+- 当前前端数据流为：后端更新 `ToApp.json`/接口数据 → `DataService` 每 1 秒读取并解析 → 回调 `Index.ets` 更新 `@State` → 页面自动重渲染。
+- 后端完整接入前，`DataService` 中的接口端点预留为空字符串，默认使用 `entry/src/main/ets/data/ToApp.json`。
+- 后续接入后端时，将 `DataService` 中的接口端点改为真实地址或配置变量；旧的 `AppConfig.backendUrl` 可作为后端地址来源。
+- `DataService` 轮询间隔为 1000ms。
 - `DataService` 使用 `@kit.NetworkKit` 的 `http.createHttp()`，请求完成后要调用 `request.destroy()`。
 - `ToAppJson` 当前支持字段包括：`focus`、`fatigue`、`relax`、`load`、`quality`、`confidence`、趋势字段、`state`、`direction`、`advice`、`local`、`model`、`summary`。
+- `Index.ets` 中仪表盘、建议卡片、脑电频谱、个人页统计应优先绑定 `ToAppJson` 数据；后端失连或字段缺失时保持 0/空值或已有状态，不再使用写死演示指标。
 - `entry/src/main/module.json5` 已声明 `ohos.permission.INTERNET`，网络相关改动应保持权限配置一致。
 
 ## UI 与设计约定
@@ -59,6 +62,7 @@
 
 - 文档和源码中包含中文注释，读取文件时请使用 UTF-8 编码，避免 PowerShell 默认编码导致乱码。
 - 现有工作区可能存在用户未提交改动，修改前先查看 `git status --short`，不要回退或覆盖他人的改动。
+- 修改数据展示逻辑时，避免在计时器或 UI 交互中模拟覆盖 `focus`、`fatigue` 等后端实时字段，防止覆盖 `DataService` 回调结果。
 - 新增页面必须更新 `entry/src/main/resources/base/profile/main_pages.json`。
 - 修改包名、版本号、SDK、设备类型或权限时，要同步检查 `AppScope/app.json5`、根目录 `build-profile.json5` 和 `entry/src/main/module.json5`。
 - 生成目录如 `.hvigor/`、`build/`、`entry/build/`、`.idea/` 通常不应纳入提交。
@@ -68,6 +72,6 @@
 
 - 小范围 ArkTS/UI 改动：至少在 DevEco Studio 中同步并构建 `entry` 模块。
 - 涉及页面路由：确认 `main_pages.json` 已注册，并验证 `EntryAbility` 能加载对应页面。
-- 涉及网络数据：确认后端地址可达、`/api/eeg` 返回 JSON，并观察 `DataService` 错误日志。
+- 涉及网络数据：后端未接入时确认 `ToApp.json` 能驱动页面默认数据；后端接入后确认接口返回 JSON，并观察 `DataService` 错误日志。
 - 涉及计时器或轮询：重点检查离开页面、组件销毁、重复进入时是否正确清理定时器。
 

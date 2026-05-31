@@ -53,9 +53,9 @@ struct Index {
   /** 当前选中的标签页索引：0=仪表盘, 1=专注, 2=个人 */
   @State private currentTab: number = 0;
   /** 专注指数 (0-100)，从脑电数据实时计算 */
-  @State private focus: number = 88;
+  @State private focus: number = 0;
   /** 疲劳指数 (0-100)，数值越高越疲劳 */
-  @State private fatigue: number = 78;
+  @State private fatigue: number = 0;
   @State private relax: number = 0;
   @State private load: number = 0;
   @State private quality: number = 0;
@@ -70,6 +70,8 @@ struct Index {
   @State private local: boolean = true;
   @State private model: string = '';
   @State private summary: string[] = [];
+  /** 脑电频谱柱高度数组，由实时数据派生 */
+  @State private barValues: number[] = [];
   /** 番茄钟剩余秒数（默认 25 分钟） */
   @State private timerSeconds: number = DEFAULT_FOCUS_SEC;
   /** 番茄钟设定的总时长（秒），可由自定义弹窗修改 */
@@ -107,8 +109,6 @@ struct Index {
   /** 番茄钟 setTimeout 链 ID（-1 表示无待执行 tick） */
   private focusTimerId: number = -1;
   private dataService: DataService = new DataService();
-  /** 脑电频谱模拟数据（实时波柱高度数组） */
-  private barValues: number[] = [32, 46, 24, 60, 36, 72, 28, 52, 42, 66, 34, 48];
 
   // ==========================================================================
   // 国际化辅助方法
@@ -161,6 +161,53 @@ struct Index {
     this.local = data.local ?? this.local;
     this.model = data.model ?? this.model;
     this.summary = data.summary ?? this.summary;
+    this.barValues = this.createBarValues();
+  }
+
+  private clampPercent(value: number): number {
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  private trendText(value: number): string {
+    if (value > 0) {
+      return '+' + value.toString();
+    }
+    return value.toString();
+  }
+
+  private healthScore(): number {
+    const signalPart: number = (this.quality + Math.round(this.confidence * 100)) / 2;
+    const balancePart: number = (this.focus + this.relax + Math.max(0, 100 - this.fatigue) + Math.max(0, 100 - this.load)) / 4;
+    return this.clampPercent((signalPart + balancePart) / 2);
+  }
+
+  private suggestionText(): string {
+    return this.advice.length > 0 ? this.advice : '';
+  }
+
+  private summaryValue(index: number, fallback: string): string {
+    if (this.summary.length > index && this.summary[index].length > 0) {
+      return this.summary[index];
+    }
+    return fallback;
+  }
+
+  private createBarValues(): number[] {
+    const baseValues: number[] = [
+      this.focus,
+      this.fatigue,
+      this.relax,
+      this.load,
+      this.quality,
+      Math.round(this.confidence * 100)
+    ];
+    const modelSeed: number = this.model.length % 17;
+    const bars: number[] = [];
+    for (let index = 0; index < 12; index++) {
+      const source: number = baseValues[index % baseValues.length];
+      bars.push(this.clampPercent(source + modelSeed + (index % 3) * 4));
+    }
+    return bars;
   }
 
   aboutToDisappear(): void {
@@ -186,9 +233,6 @@ struct Index {
         return;
       }
       this.timerSeconds -= 1;
-      if (this.timerSeconds > 0 && this.timerSeconds % 3 === 0) {
-        this.focus = this.focus >= 94 ? 86 : this.focus + 1;
-      }
       if (this.timerRunning) {
         this.scheduleFocusTick();
       }
@@ -220,7 +264,6 @@ struct Index {
   private resetFocusTimer(): void {
     this.pauseFocusTimer();
     this.timerSeconds = this.focusDurationSec;
-    this.focus = 88;
   }
 
   /** 将秒数转为 TimePicker 用的 Date（1970-01-01 HH:mm:ss） */
@@ -379,13 +422,13 @@ struct Index {
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
 
-        // 环形进度条：综合健康评分 85/100
+        // 环形进度条：综合健康评分，随 ToAppJson 实时刷新
         Stack() {
-          Progress({ value: 85, total: 100, type: ProgressType.Ring })
+          Progress({ value: this.healthScore(), total: 100, type: ProgressType.Ring })
             .width(68)
             .height(68)
             .color(AppColor.Primary)
-          Text('85')
+          Text(this.healthScore().toString())
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppColor.Primary)
@@ -400,13 +443,35 @@ struct Index {
       Row({ space: 12 }) {
         // 实时专注指数卡片
         this.MetricCard(
-          this.t('实时专注', 'Live Focus'), '48', this.t('级', 'lvl'),
-          AppColor.Good, this.t('1分钟前测量', 'Measured 1 min ago'), 48
+          this.t('实时专注', 'Live Focus'), this.focus.toString(), '/100',
+          AppColor.Good, this.t('实时数据', 'Live data'), this.focus, this.focusTrend
         )
         // 疲劳指数卡片
         this.MetricCard(
           this.t('疲劳指数', 'Fatigue Index'), this.fatigue.toString(), '/100',
-          AppColor.Danger, this.t('休息5分钟', 'Rest for 5 minutes'), this.fatigue
+          AppColor.Danger, this.t('实时数据', 'Live data'), this.fatigue, this.fatigueTrend
+        )
+      }
+
+      Row({ space: 12 }) {
+        this.MetricCard(
+          this.t('放松指数', 'Relax Index'), this.relax.toString(), '/100',
+          AppColor.Primary, this.t('实时数据', 'Live data'), this.relax, this.relaxTrend
+        )
+        this.MetricCard(
+          this.t('脑负荷', 'Brain Load'), this.load.toString(), '/100',
+          AppColor.Warning, this.t('实时数据', 'Live data'), this.load, this.loadTrend
+        )
+      }
+
+      Row({ space: 12 }) {
+        this.MetricCard(
+          this.t('信号质量', 'Signal Quality'), this.quality.toString(), '/100',
+          AppColor.Good, this.t('实时数据', 'Live data'), this.quality, 0
+        )
+        this.MetricCard(
+          this.t('置信度', 'Confidence'), Math.round(this.confidence * 100).toString(), '%',
+          AppColor.Primary, this.t('实时数据', 'Live data'), Math.round(this.confidence * 100), 0
         )
       }
 
@@ -430,7 +495,7 @@ struct Index {
    * @param progress - 进度值 (0-100)
    */
   @Builder
-  MetricCard(title: string, value: string, unit: string, color: string, note: string, progress: number) {
+  MetricCard(title: string, value: string, unit: string, color: string, note: string, progress: number, trend: number) {
     Column() {
       // 标题行：名称 + 趋势标记
       Row() {
@@ -439,11 +504,10 @@ struct Index {
           .fontWeight(FontWeight.Medium)
           .fontColor(AppColor.Text)
         Blank()
-        // 危险指标显示 '!'，正常指标显示 '+5%'
-        Text(color === AppColor.Danger ? '!' : '+5%')
+        Text(this.trendText(trend))
           .fontSize(12)
           .fontWeight(FontWeight.Bold)
-          .fontColor(color)
+          .fontColor(trend < 0 ? AppColor.Danger : color)
       }
       .width('100%')
 
@@ -461,7 +525,7 @@ struct Index {
       .margin({ top: 20 })
 
       // 线性进度条（0-100%）
-      Progress({ value: progress, total: 100, type: ProgressType.Linear })
+      Progress({ value: this.clampPercent(progress), total: 100, type: ProgressType.Linear })
         .height(8)
         .color(color)
         .margin({ top: 16 })
@@ -493,11 +557,11 @@ struct Index {
         .fontWeight(FontWeight.Bold)
         .fontColor(AppColor.Text)
       // Alpha 波：放松状态，主题色
-      this.WaveRow('Alpha', 65, AppColor.Primary)
-      // Theta 波：冥想/浅睡，绿色
-      this.WaveRow('Theta', 40, AppColor.Good)
-      // Beta 波：活跃思考，橙色警告
-      this.WaveRow('Beta', 82, AppColor.Warning)
+      this.WaveRow('Alpha', this.relax, AppColor.Primary)
+      // Theta 波：认知负荷/内省状态
+      this.WaveRow('Theta', this.load, AppColor.Good)
+      // Beta 波：活跃思考/疲劳压力
+      this.WaveRow('Beta', this.fatigue, AppColor.Warning)
     }
     .alignItems(HorizontalAlign.Start)
     .padding(14)
@@ -558,10 +622,7 @@ struct Index {
       }
 
       // 建议文本内容
-      Text(this.t(
-        '高Beta波活动和疲劳指数表明大脑处于活跃状态。建议进行25分钟专注冲刺，然后休息5分钟。',
-        'High beta activity and fatigue indicate an active brain state. Try a 25-minute focus sprint followed by a 5-minute deliberate rest.'
-      ))
+      Text(this.suggestionText())
         .fontSize(14)
         .lineHeight(22)
         .fontColor(AppColor.Muted)
@@ -768,7 +829,7 @@ struct Index {
           Column() {
           }
             .width(5)
-            .height(height)
+            .height(Math.max(8, height))
             .borderRadius(3)
             .opacity(0.72)
             .backgroundColor(AppColor.Primary)
@@ -875,8 +936,8 @@ struct Index {
 
       // ── 统计汇总卡片（今日专注 + 平均疲劳）──
       Row({ space: 12 }) {
-        SummaryCard({ title: this.t('今日专注', 'Today Focus'), value: '2h 30m', color: AppColor.Primary })
-        SummaryCard({ title: this.t('平均疲劳', 'Avg Fatigue'), value: '45 /100', color: AppColor.Warning })
+        SummaryCard({ title: this.t('今日专注', 'Today Focus'), value: this.summaryValue(0, '0'), color: AppColor.Primary })
+        SummaryCard({ title: this.t('平均疲劳', 'Avg Fatigue'), value: this.summaryValue(1, this.fatigue.toString() + ' /100'), color: AppColor.Warning })
       }
 
       // ── 功能菜单列表 ──
