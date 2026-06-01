@@ -5,6 +5,7 @@
 #include <sstream>
 #include <fstream>
 #include <regex>
+#include <cstdlib>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -12,6 +13,17 @@
 #else
 #define USE_MOCK_MODEL 0
 #endif
+
+const std::string BASE_DIR = "/data/eeg_health";
+const std::string DATA_DIR = BASE_DIR + "/data";
+const std::string CURRENT_JSON_PATH = DATA_DIR + "/currentData.json";
+const std::string TO_APP_JSON_PATH = DATA_DIR + "/ToApp.json";
+const std::string TO_APP_TMP_PATH = DATA_DIR + "/ToApp.tmp";
+const std::string LLAMA_LOADER_PATH = BASE_DIR + "/runtime/oh-llama.cpp/lib/ld-linux-aarch64.so.1";
+const std::string LLAMA_LIBRARY_PATH = BASE_DIR + "/runtime/oh-llama.cpp/lib";
+const std::string LLAMA_CLI_PATH = BASE_DIR + "/runtime/oh-llama.cpp/build/bin/llama-cli";
+const std::string MODEL_PATH = BASE_DIR + "/models/qwen2.5-1.5b-instruct-q4_k_m-00001-of-00001.gguf";
+const std::string MODEL_NAME = "qwen2.5-1.5b-instruct-q4_k_m";
 
 struct EEGAdviceInput {
     std::string state = "normal";
@@ -162,7 +174,7 @@ std::string fallbackAdvice(const EEGAdviceInput& input) {
     return "建议：保持当前节奏。";
 }
 
-std::string cleanOutput(std::string text, const EEGAdviceInput& input) {
+std::string cleanOutput(std::string text, const EEGAdviceInput& input, bool* usedFallback = nullptr) {
     const std::string eos = "[end of text]";
     size_t pos = text.find(eos);
     if (pos != std::string::npos) {
@@ -209,6 +221,11 @@ std::string cleanOutput(std::string text, const EEGAdviceInput& input) {
 
     if (bestLine.empty()) {
         bestLine = fallbackAdvice(input);
+        if (usedFallback != nullptr) {
+            *usedFallback = true;
+        }
+    } else if (usedFallback != nullptr) {
+        *usedFallback = false;
     }
 
     if (bestLine.find("建议：") == std::string::npos) {
@@ -235,7 +252,7 @@ std::string escapeJson(const std::string& input) {
     return output;
 }
 
-std::string buildJson(const EEGAdviceInput& input, const std::string& advice) {
+std::string buildJson(const EEGAdviceInput& input, const std::string& advice, bool fallbackUsed) {
     std::stringstream ss;
 
     ss << "{";
@@ -253,7 +270,8 @@ std::string buildJson(const EEGAdviceInput& input, const std::string& advice) {
     ss << "\"direction\":\"" << escapeJson(buildDirection(input)) << "\",";
     ss << "\"advice\":\"" << escapeJson(advice) << "\",";
     ss << "\"local\":true,";
-    ss << "\"model\":\"qwen2.5-1.5b-instruct-q4_k_m\"";
+    ss << "\"fallback\":" << (fallbackUsed ? "true" : "false") << ",";
+    ss << "\"model\":\"" << MODEL_NAME << "\"";
     ss << "}";
 
     return ss.str();
@@ -337,10 +355,10 @@ bool loadCurrentDataFromJson(const std::string& path, EEGAdviceInput& input) {
     ok = extractIntField(content, "metrics", "quality", input.quality) && ok;
     ok = extractFloatField(content, "metrics", "confidence", input.confidence) && ok;
 
-    ok = extractIntField(content, "trend", "focus", input.focusTrend) && ok;
-    ok = extractIntField(content, "trend", "fatigue", input.fatigueTrend) && ok;
-    ok = extractIntField(content, "trend", "relax", input.relaxTrend) && ok;
-    ok = extractIntField(content, "trend", "load", input.loadTrend) && ok;
+    ok = extractIntField(content, "metrics", "focusTrend", input.focusTrend) && ok;
+    ok = extractIntField(content, "metrics", "fatigueTrend", input.fatigueTrend) && ok;
+    ok = extractIntField(content, "metrics", "relaxTrend", input.relaxTrend) && ok;
+    ok = extractIntField(content, "metrics", "loadTrend", input.loadTrend) && ok;
 
     return ok;
 }
@@ -377,8 +395,16 @@ std::string buildToAppJson(const std::string& json, int sequence) {
     return "{\"sequence\":" + std::to_string(sequence) + "," + json.substr(1);
 }
 
+void ensureDataDir() {
+#ifdef _WIN32
+    system("if not exist C:\\data\\eeg_health\\data mkdir C:\\data\\eeg_health\\data");
+#else
+    system("mkdir -p /data/eeg_health/data");
+#endif
+}
+
 bool writeJsonAtomic(const std::string& path, const std::string& json) {
-    const std::string tmpPath = "ToApp.tmp";
+    const std::string tmpPath = TO_APP_TMP_PATH;
 
     std::ofstream outFile(tmpPath);
     if (!outFile.is_open()) {
@@ -401,6 +427,19 @@ bool writeJsonAtomic(const std::string& path, const std::string& json) {
 
 std::string mockModelOutput(const EEGAdviceInput& input) {
     return fallbackAdvice(input) + " [end of text]";
+}
+
+std::string shellQuoteSingle(const std::string& text) {
+    std::string quoted = "'";
+    for (char c : text) {
+        if (c == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += c;
+        }
+    }
+    quoted += "'";
+    return quoted;
 }
 
 #ifndef _WIN32
@@ -431,19 +470,18 @@ std::string runModel(const EEGAdviceInput& input) {
     return mockModelOutput(input);
 #else
     std::string cmd =
-        "cd /data/oh-llama.cpp && "
-        "./lib/ld-linux-aarch64.so.1 "
-        "--library-path /data/oh-llama.cpp/lib:/data/oh-llama.cpp/lib/lib "
-        "./build/bin/llama-cli "
-        "-m /data/models/qwen2.5-1.5b-instruct-q4_k_m-00001-of-00001.gguf "
+        LLAMA_LOADER_PATH + " "
+        "--library-path " + LLAMA_LIBRARY_PATH + " " +
+        LLAMA_CLI_PATH + " "
+        "-m " + MODEL_PATH + " "
         "--log-disable "
         "-no-cnv "
         "--no-display-prompt "
         "--temp 0.1 "
         "--top-p 0.5 "
         "--repeat-penalty 1.15 "
-        "-n 22 "
-        "-p '" + prompt + "' 2>/dev/null";
+        "-n 40 "
+        "-p " + shellQuoteSingle(prompt) + " 2>/dev/null";
 
     return runCommand(cmd);
 #endif
@@ -493,21 +531,25 @@ int main(int argc, char* argv[]) {
 #endif
 
     EEGAdviceInput input;
-    if (!loadCurrentDataFromJson("currentData.json", input)) {
+    ensureDataDir();
+
+    if (!loadCurrentDataFromJson(CURRENT_JSON_PATH, input)) {
+        std::cerr << "fallback: " << CURRENT_JSON_PATH << " not found or invalid, using default test data" << std::endl;
         input = parseInput(argc, argv);
     }
 
     std::string rawOutput = runModel(input);
-    std::string advice = cleanOutput(rawOutput, input);
+    bool fallbackUsed = false;
+    std::string advice = cleanOutput(rawOutput, input, &fallbackUsed);
 
-    std::string json = buildJson(input, advice);
-    int newSequence = readOldSequenceFromToApp("ToApp.json") + 1;
+    std::string json = buildJson(input, advice, fallbackUsed);
+    int newSequence = readOldSequenceFromToApp(TO_APP_JSON_PATH) + 1;
     if (newSequence <= 0) {
         newSequence = 1;
     }
 
     std::string toAppJson = buildToAppJson(json, newSequence);
-    writeJsonAtomic("ToApp.json", toAppJson);
+    writeJsonAtomic(TO_APP_JSON_PATH, toAppJson);
 
     std::cout << toAppJson << std::endl;
 
