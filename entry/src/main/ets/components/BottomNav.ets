@@ -11,14 +11,12 @@ export struct BottomNav {
     if (this.language === 0) {
       return [
         new TabItem('D', '仪表盘'),
-        new TabItem('F', '专注'),
-        new TabItem('P', '个人')
+        new TabItem('F', '专注')
       ];
     }
     return [
       new TabItem('D', 'Dashboard'),
-      new TabItem('F', 'Focus'),
-      new TabItem('P', 'Profile')
+      new TabItem('F', 'Focus')
     ];
   }
 

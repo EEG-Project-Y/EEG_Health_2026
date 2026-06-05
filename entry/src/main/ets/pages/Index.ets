@@ -12,12 +12,11 @@ import { initSettingsStorage } from '../store/SettingsStore';
  *
  * 功能概述：
  *   基于 HarmonyOS ArkUI 框架构建的 AI 健康监测应用主界面，
- *   提供脑电(EEG)数据分析、专注计时和个人设置等核心功能。
+ *   提供脑电(EEG)数据分析、专注计时和健康建议等核心功能。
  *
- * 页面架构（3 个 Tab 页签）：
+ * 页面架构（2 个 Tab 页签）：
  *   1. 仪表盘 (Dashboard)  - 健康状态总览、实时专注/疲劳指标、脑电频谱、AI 建议
  *   2. 专注    (Focus)       - 番茄钟计时器、实时专注数据、休息建议
- *   3. 个人    (Profile)     - 用户信息、健康统计
  *
  * 技术栈：
  *   - ArkTS 声明式 UI + @Component/@Builder 组件化架构
@@ -28,7 +27,7 @@ import { initSettingsStorage } from '../store/SettingsStore';
  * 文件结构（按 @Builder 顺序）：
  *   AppColor → Index struct → TopBar → DashboardPage → MetricCard
  *   → SpectrumCard → WaveRow → SuggestionCard → FocusPage → FocusDataCard
- *   → RestAdviceCard → Tag → ProfilePage → SummaryCard → BottomNav
+ *   → RestAdviceCard → Tag → ProfilePage(未使用) → SummaryCard → BottomNav
  *   → TabItem 辅助类
  */
 
@@ -47,7 +46,7 @@ struct Index {
   // 状态变量（@State 响应式数据，变化时自动触发 UI 更新）
   // ──────────────────────────────────────────────────────────────────────────
 
-  /** 当前选中的标签页索引：0=仪表盘, 1=专注, 2=个人 */
+  /** 当前选中的标签页索引：0=仪表盘, 1=专注 */
   @State private currentTab: number = 0;
   /** 专注指数 (0-100)，从脑电数据实时计算 */
   @State private focus: number = 0;
@@ -77,6 +76,12 @@ struct Index {
   @State private timerRunning: boolean = false;
   /** 是否显示自定义专注时长弹窗 */
   @State private showDurationDialog: boolean = false;
+  /** 是否显示健康/疲劳警告弹窗 */
+  @State private showHealthAlert: boolean = false;
+  @State private alertLowHealth: boolean = false;
+  @State private alertHighFatigue: boolean = false;
+  private alertMuted: boolean = false;
+  private lastAlertActive: boolean = false;
   /** 弹窗内滚轮选中的时长（时/分/秒映射为 Date） */
   @State private draftDurationDate: Date = new Date(1970, 0, 1, 0, 25, 0);
   // ──────────────────────────────────────────────────────────────────────────
@@ -85,6 +90,8 @@ struct Index {
 
   /** 当前语言：0=中文, 1=English */
   @StorageLink('language') private language: number = 0;
+  @StorageLink('healthThreshold') private healthThreshold: number = 40;
+  @StorageLink('fatigueThreshold') private fatigueThreshold: number = 80;
 
   // ──────────────────────────────────────────────────────────────────────────
   // 私有成员变量
@@ -147,6 +154,7 @@ struct Index {
     this.model = data.model ?? this.model;
     this.summary = data.summary ?? this.summary;
     this.barValues = this.createBarValues();
+    this.updateHealthAlert();
   }
 
   private clampPercent(value: number): number {
@@ -193,6 +201,29 @@ struct Index {
       bars.push(this.clampPercent(source + modelSeed + (index % 3) * 4));
     }
     return bars;
+  }
+
+  private updateHealthAlert(): void {
+    const lowHealth: boolean = this.healthScore() < this.healthThreshold;
+    const highFatigue: boolean = this.fatigue > this.fatigueThreshold;
+    const hasAlert: boolean = lowHealth || highFatigue;
+    if (!hasAlert) {
+      this.showHealthAlert = false;
+      this.alertMuted = false;
+      this.alertLowHealth = false;
+      this.alertHighFatigue = false;
+      this.lastAlertActive = false;
+      return;
+    }
+    if (this.alertMuted) {
+      return;
+    }
+    this.alertLowHealth = lowHealth;
+    this.alertHighFatigue = highFatigue;
+    if (!this.lastAlertActive) {
+      this.showHealthAlert = true;
+    }
+    this.lastAlertActive = true;
   }
 
   aboutToDisappear(): void {
@@ -334,10 +365,8 @@ struct Index {
             // 根据 currentTab 切换显示不同页面
             if (this.currentTab === 0) {
               this.DashboardPage()
-            } else if (this.currentTab === 1) {
-              this.FocusPage()
             } else {
-              this.ProfilePage()
+              this.FocusPage()
             }
           }
           .width('100%')
@@ -358,6 +387,16 @@ struct Index {
           this.switchTab(index);
         }
       })
+
+      if (this.showHealthAlert) {
+        Stack() {
+          this.HealthAlertDialog()
+        }
+        .width('100%')
+        .height('100%')
+        .position({ x: 0, y: 0 })
+        .zIndex(1100)
+      }
 
       if (this.showDurationDialog) {
         Stack() {
@@ -779,6 +818,58 @@ struct Index {
   }
 
   /**
+   * 健康/疲劳警告弹窗
+   * 触发条件：健康指数低于阈值或疲劳指数高于阈值
+   */
+  @Builder
+  HealthAlertDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#66FF4D4F')
+
+      Column({ space: 14 }) {
+        Text(this.t('健康警报', 'Health Alert'))
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+
+        if (this.alertLowHealth) {
+          Text(this.t('检测到健康度过低。', 'Low health detected.'))
+            .fontSize(14)
+            .fontColor(Color.White)
+        }
+        if (this.alertHighFatigue) {
+          Text(this.t('检测到过度疲劳。', 'Excessive fatigue detected.'))
+            .fontSize(14)
+            .fontColor(Color.White)
+        }
+
+        Button(this.t('已了解，休息一下', 'Got it, take a break'))
+          .height(44)
+          .width('100%')
+          .borderRadius(12)
+          .fontColor(AppColor.Danger)
+          .fontWeight(FontWeight.Bold)
+          .backgroundColor(Color.White)
+          .onClick(() => {
+            this.showHealthAlert = false;
+            this.alertMuted = true;
+          })
+      }
+      .padding(18)
+      .width('82%')
+      .backgroundColor('#CCFF4D4F')
+      .borderRadius(18)
+      .border({ width: 1, color: '#55FFFFFF' })
+      .shadow({ radius: 18, color: '#66000000', offsetX: 0, offsetY: 8 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /**
    * 实时专注数据卡片
    * 显示当前专注指数和脑电波实时波形图
    */
@@ -880,12 +971,13 @@ struct Index {
   }
 
   // ==========================================================================
-  // @Builder 方法 - 个人页面（Profile）
+  // @Builder 方法 - 个人页面（Profile，当前未使用）
   // ==========================================================================
 
   /**
    * 个人页面 - 用户中心 + 健康摘要
    * 包含：用户信息 → 今日/疲劳统计
+   * 说明：当前模块未在应用导航中使用，仅保留作为参考。
    */
   @Builder
   ProfilePage() {
@@ -946,9 +1038,9 @@ struct Index {
   // ==========================================================================
 
   /**
-   * 底部导航栏（3 个 Tab）
+  * 底部导航栏（2 个 Tab）
    * 带毛玻璃效果背景，选中态为主题色高亮
-   * Tab 图标：D=仪表盘, F=专注, P=个人
+  * Tab 图标：D=仪表盘, F=专注
    */
   /**
    * 获取导航栏 Tab 项列表（支持中英双语）

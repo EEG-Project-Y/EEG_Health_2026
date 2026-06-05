@@ -3,7 +3,7 @@ export const SettingsDefaults = {
   autoReconnect: true,
   cloudSync: true,
   keepScreenOn: false,
-  focusThreshold: 40,
+  healthThreshold: 40,
   fatigueThreshold: 80,
   bgStyle: 0
 };
@@ -13,7 +13,7 @@ export function initSettingsStorage(): void {
   AppStorage.SetOrCreate('autoReconnect', SettingsDefaults.autoReconnect);
   AppStorage.SetOrCreate('cloudSync', SettingsDefaults.cloudSync);
   AppStorage.SetOrCreate('keepScreenOn', SettingsDefaults.keepScreenOn);
-  AppStorage.SetOrCreate('focusThreshold', SettingsDefaults.focusThreshold);
+  AppStorage.SetOrCreate('healthThreshold', SettingsDefaults.healthThreshold);
   AppStorage.SetOrCreate('fatigueThreshold', SettingsDefaults.fatigueThreshold);
   AppStorage.SetOrCreate('bgStyle', SettingsDefaults.bgStyle);
 }

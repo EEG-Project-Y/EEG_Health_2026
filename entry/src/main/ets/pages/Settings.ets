@@ -10,7 +10,7 @@ struct Settings {
   @StorageLink('autoReconnect') private autoReconnect: boolean = true;
   @StorageLink('cloudSync') private cloudSync: boolean = true;
   @StorageLink('keepScreenOn') private keepScreenOn: boolean = false;
-  @StorageLink('focusThreshold') private focusThreshold: number = 40;
+  @StorageLink('healthThreshold') private healthThreshold: number = 40;
   @StorageLink('fatigueThreshold') private fatigueThreshold: number = 80;
   @StorageLink('bgStyle') private bgStyle: number = 0;
 
@@ -60,7 +60,7 @@ struct Settings {
 
           this.SectionTitle(this.t('提醒与阈值', 'Alerts & Thresholds'))
           Column({ space: 12 }) {
-            this.SliderFocusThreshold()
+            this.SliderHealthThreshold()
             this.SliderFatigueThreshold()
           }
           .backgroundColor(AppColor.Card)
@@ -167,21 +167,21 @@ struct Settings {
   }
 
   @Builder
-  SliderFocusThreshold() {
+  SliderHealthThreshold() {
     Column({ space: 8 }) {
       Row() {
-        Text(this.t('专注阈值', 'Focus threshold'))
+        Text(this.t('健康阈值', 'Health threshold'))
           .fontSize(15)
           .fontColor(AppColor.Text)
         Blank()
-        Text(Math.round(this.focusThreshold).toString() + '%')
+        Text(Math.round(this.healthThreshold).toString() + '%')
           .fontSize(13)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Primary)
       }
       .width('100%')
       Slider({
-        value: this.focusThreshold,
+        value: this.healthThreshold,
         min: 0,
         max: 100,
         step: 1,
@@ -192,7 +192,7 @@ struct Settings {
         .trackColor(AppColor.PrimarySoft)
         .selectedColor(AppColor.Primary)
         .onChange((value: number) => {
-          this.focusThreshold = value;
+          this.healthThreshold = value;
         })
     }
     .width('100%')

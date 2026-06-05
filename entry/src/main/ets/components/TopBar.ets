@@ -12,11 +12,11 @@ export struct TopBar {
 
   private getTabName(index: number): string {
     if (this.language === 0) {
-      const zhNames: string[] = ['仪表盘', '专注', '个人'];
-      return zhNames[index];
+      const zhNames: string[] = ['仪表盘', '专注'];
+      return zhNames[index] ?? zhNames[0];
     }
-    const enNames: string[] = ['Dashboard', 'Focus', 'Profile'];
-    return enNames[index];
+    const enNames: string[] = ['Dashboard', 'Focus'];
+    return enNames[index] ?? enNames[0];
   }
 
   build() {
