@@ -1,0 +1,12 @@
+#===============================================================================
+# @brief    Kconfig file.
+# Copyright (c) @CompanyNameMagicTag 2023-2023. All rights reserved.
+#===============================================================================
+
+config SAMPLE_ENABLE_ADC_DEMO
+    bool
+    prompt "Enable standalone ADC demo app_run."
+    default n
+    depends on SAMPLE_SUPPORT_ADC
+    help
+        This option enables the original adc_demo.c app_run sample. Keep it disabled when ADC is only used by another sample such as KS1092.

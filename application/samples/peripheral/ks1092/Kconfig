@@ -1,0 +1,51 @@
+#===============================================================================
+# @brief    KS1092 local raw sampling configuration.
+#===============================================================================
+
+config KS1092_SPI_BUS_ID
+    int
+    prompt "KS1092 SPI bus id."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 0
+
+config KS1092_SPI_DI_PIN
+    int
+    prompt "KS1092 SPI DI/MISO pin."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 11
+
+config KS1092_SPI_DO_PIN
+    int
+    prompt "KS1092 SPI DO/MOSI pin."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 9
+
+config KS1092_SPI_CLK_PIN
+    int
+    prompt "KS1092 SPI CLK pin."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 7
+
+config KS1092_SPI_CS_PIN
+    int
+    prompt "KS1092 SPI CS pin."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 8
+
+config KS1092_RESET_PIN
+    int
+    prompt "KS1092 RESET pin."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 6
+
+config KS1092_ADC_CH1
+    int
+    prompt "ADC channel connected to KS1092 VO1."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 3
+
+config KS1092_ADC_CH2
+    int
+    prompt "ADC channel connected to KS1092 VO2."
+    depends on SAMPLE_SUPPORT_KS1092
+    default 5

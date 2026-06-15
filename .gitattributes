@@ -1,0 +1,2 @@
+* -text
+analyzerJson/memoryDetails.json filter=lfs diff=lfs merge=lfs -text
