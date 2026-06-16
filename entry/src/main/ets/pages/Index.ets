@@ -33,8 +33,12 @@ import { initSettingsStorage } from '../store/SettingsStore';
 
 /** 番茄钟默认时长（25 分钟），与 Progress 环 total 默认值一致 */
 const DEFAULT_FOCUS_SEC: number = 1500;
+/** 自定义专注时长下限（1 分钟） */
+const MIN_FOCUS_SEC: number = 60;
 /** 自定义专注时长上限（24 小时） */
 const MAX_FOCUS_SEC: number = 86400;
+/** 自定义时长步进（5 分钟） */
+const FOCUS_STEP_SEC: number = 300;
 
 // ============================================================================
 // Index - 应用主组件（@Entry 入口 + @Component 自定义组件）
@@ -82,8 +86,8 @@ struct Index {
   @State private alertHighFatigue: boolean = false;
   private alertMuted: boolean = false;
   private lastAlertActive: boolean = false;
-  /** 弹窗内滚轮选中的时长（时/分/秒映射为 Date） */
-  @State private draftDurationDate: Date = new Date(1970, 0, 1, 0, 25, 0);
+  /** 弹窗内临时选择的专注时长（秒） */
+  @State private draftDurationSec: number = DEFAULT_FOCUS_SEC;
   // ──────────────────────────────────────────────────────────────────────────
   // 语言设置（0=中文, 1=English，默认中文）
   // ──────────────────────────────────────────────────────────────────────────
@@ -282,18 +286,30 @@ struct Index {
     this.timerSeconds = this.focusDurationSec;
   }
 
-  /** 将秒数转为 TimePicker 用的 Date（1970-01-01 HH:mm:ss） */
-  private dateFromSeconds(total: number): Date {
-    const safeTotal: number = Math.max(0, Math.min(total, MAX_FOCUS_SEC));
-    const hours: number = Math.floor(safeTotal / 3600);
-    const minutes: number = Math.floor((safeTotal % 3600) / 60);
-    const seconds: number = safeTotal % 60;
-    return new Date(1970, 0, 1, hours, minutes, seconds);
+  /** 将专注时长限制在设备侧可安全处理的范围内 */
+  private clampDuration(total: number): number {
+    return Math.max(MIN_FOCUS_SEC, Math.min(total, MAX_FOCUS_SEC));
   }
 
-  /** 从 TimePicker Date 读取总秒数 */
-  private secondsFromDate(date: Date): number {
-    return date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+  /** 调整弹窗内临时专注时长 */
+  private adjustDraftDuration(delta: number): void {
+    this.draftDurationSec = this.clampDuration(this.draftDurationSec + delta);
+  }
+
+  /** 设置弹窗内预设专注时长 */
+  private setDraftDuration(total: number): void {
+    this.draftDurationSec = this.clampDuration(total);
+  }
+
+  /** 格式化时长展示文本，避免依赖 API 11 的秒级 TimePicker */
+  private durationText(total: number): string {
+    const safeTotal: number = this.clampDuration(total);
+    const hours: number = Math.floor(safeTotal / 3600);
+    const minutes: number = Math.floor((safeTotal % 3600) / 60);
+    if (hours > 0) {
+      return hours.toString() + this.t(' 小时 ', 'h ') + minutes.toString() + this.t(' 分钟', 'm');
+    }
+    return minutes.toString() + this.t(' 分钟', ' min');
   }
 
   /** 打开自定义专注时长弹窗 */
@@ -301,7 +317,7 @@ struct Index {
     if (this.timerRunning) {
       return;
     }
-    this.draftDurationDate = this.dateFromSeconds(this.timerSeconds);
+    this.draftDurationSec = this.clampDuration(this.timerSeconds > 0 ? this.timerSeconds : this.focusDurationSec);
     this.showDurationDialog = true;
   }
 
@@ -312,12 +328,12 @@ struct Index {
 
   /** 确认自定义时长并应用到番茄钟 */
   private confirmDurationDialog(): void {
-    const total: number = this.secondsFromDate(this.draftDurationDate);
+    const total: number = this.clampDuration(this.draftDurationSec);
     if (total <= 0) {
       return;
     }
     this.pauseFocusTimer();
-    this.focusDurationSec = Math.min(total, MAX_FOCUS_SEC);
+    this.focusDurationSec = total;
     this.timerSeconds = this.focusDurationSec;
     this.showDurationDialog = false;
   }
@@ -757,7 +773,8 @@ struct Index {
   @Builder
   FocusDurationDialog() {
     Stack({ alignContent: Alignment.Center }) {
-      Column()
+      Column() {
+      }
         .width('100%')
         .height('100%')
         .backgroundColor('#80000000')
@@ -773,16 +790,101 @@ struct Index {
           .width('100%')
           .textAlign(TextAlign.Center)
 
-        TimePicker({
-          selected: this.draftDurationDate,
-          format: TimePickerFormat.HOUR_MINUTE_SECOND
-        })
-          .useMilitaryTime(true)
-          .onChange((value: TimePickerResult) => {
-            if (value.hour >= 0) {
-              this.draftDurationDate = new Date(1970, 0, 1, value.hour, value.minute, value.second);
-            }
-          })
+        Text(this.durationText(this.draftDurationSec))
+          .fontSize(34)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Primary)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 10, bottom: 10 })
+          .borderRadius(16)
+          .backgroundColor(AppColor.PrimarySoft)
+
+        Row({ space: 8 }) {
+          Button('-5')
+            .layoutWeight(1)
+            .height(44)
+            .borderRadius(12)
+            .fontColor(AppColor.Primary)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.adjustDraftDuration(-FOCUS_STEP_SEC);
+            })
+          Button('-1')
+            .layoutWeight(1)
+            .height(44)
+            .borderRadius(12)
+            .fontColor(AppColor.Primary)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.adjustDraftDuration(-60);
+            })
+          Button('+1')
+            .layoutWeight(1)
+            .height(44)
+            .borderRadius(12)
+            .fontColor(AppColor.Primary)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.adjustDraftDuration(60);
+            })
+          Button('+5')
+            .layoutWeight(1)
+            .height(44)
+            .borderRadius(12)
+            .fontColor(AppColor.Primary)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.adjustDraftDuration(FOCUS_STEP_SEC);
+            })
+        }
+        .width('100%')
+
+        Row({ space: 8 }) {
+          Button('15')
+            .layoutWeight(1)
+            .height(40)
+            .borderRadius(12)
+            .fontColor(AppColor.Muted)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.setDraftDuration(15 * 60);
+            })
+          Button('25')
+            .layoutWeight(1)
+            .height(40)
+            .borderRadius(12)
+            .fontColor(AppColor.Muted)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.setDraftDuration(25 * 60);
+            })
+          Button('45')
+            .layoutWeight(1)
+            .height(40)
+            .borderRadius(12)
+            .fontColor(AppColor.Muted)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.setDraftDuration(45 * 60);
+            })
+          Button('60')
+            .layoutWeight(1)
+            .height(40)
+            .borderRadius(12)
+            .fontColor(AppColor.Muted)
+            .backgroundColor(AppColor.Surface)
+            .onClick(() => {
+              this.setDraftDuration(60 * 60);
+            })
+        }
+        .width('100%')
+
+        Text(this.t('单位：分钟。计时期间不可修改。', 'Unit: minutes. Duration is locked while focusing.'))
+          .fontSize(12)
+          .fontColor(AppColor.Muted)
+          .width('100%')
+          .textAlign(TextAlign.Center)
 
         Row({ space: 12 }) {
           Button(this.t('取消', 'Cancel'))
