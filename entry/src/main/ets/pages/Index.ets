@@ -4,6 +4,7 @@ import { TopBar } from '../components/TopBar';
 import { DataService, ToAppJson } from '../data/DataService';
 import { AppColor } from '../theme/AppColor';
 import { initSettingsStorage } from '../store/SettingsStore';
+import common from '@ohos.app.ability.common';
 
 /**
  * ============================================================================
@@ -40,6 +41,28 @@ const MAX_FOCUS_SEC: number = 86400;
 /** 自定义时长步进（5 分钟） */
 const FOCUS_STEP_SEC: number = 300;
 
+interface BrainData {
+  sequence: number;
+  timestamp?: number;
+  focus: number;
+  fatigue: number;
+  relax: number;
+  load: number;
+  quality: number;
+  confidence: number;
+  focusTrend: number;
+  fatigueTrend: number;
+  relaxTrend: number;
+  loadTrend: number;
+  state: string;
+  mode: string;
+  direction: string;
+  advice: string;
+  local: boolean;
+  model: string;
+  summary: string[];
+}
+
 // ============================================================================
 // Index - 应用主组件（@Entry 入口 + @Component 自定义组件）
 // ============================================================================
@@ -52,24 +75,39 @@ struct Index {
 
   /** 当前选中的标签页索引：0=仪表盘, 1=专注 */
   @State private currentTab: number = 0;
-  /** 专注指数 (0-100)，从脑电数据实时计算 */
-  @State private focus: number = 0;
-  /** 疲劳指数 (0-100)，数值越高越疲劳 */
-  @State private fatigue: number = 0;
-  @State private relax: number = 0;
-  @State private load: number = 0;
-  @State private quality: number = 0;
-  @State private confidence: number = 0;
-  @State private focusTrend: number = 0;
-  @State private fatigueTrend: number = 0;
-  @State private relaxTrend: number = 0;
-  @State private loadTrend: number = 0;
-  @State private state: string = 'normal';
-  @State private eegDirection: string = '';
-  @State private advice: string = '';
-  @State private local: boolean = true;
-  @State private model: string = '';
-  @State private summary: string[] = [];
+  @State private brainData: BrainData = {
+    sequence: 0,
+    focus: 0,
+    fatigue: 0,
+    relax: 0,
+    load: 0,
+    quality: 0,
+    confidence: 0,
+    focusTrend: 0,
+    fatigueTrend: 0,
+    relaxTrend: 0,
+    loadTrend: 0,
+    state: 'unknown',
+    mode: '',
+    direction: '',
+    advice: '',
+    local: true,
+    model: '',
+    summary: []
+  };
+  @State private uiFocus: number = 0;
+  @State private uiFatigue: number = 0;
+  @State private uiRelax: number = 0;
+  @State private uiLoad: number = 0;
+  @State private uiQuality: number = 0;
+  @State private uiConfidence: number = 0;
+  @State private uiFocusTrend: number = 0;
+  @State private uiFatigueTrend: number = 0;
+  @State private uiRelaxTrend: number = 0;
+  @State private uiLoadTrend: number = 0;
+  @State private uiState: string = 'unknown';
+  @State private uiSequence: number = 0;
+  @State private uiAdvice: string = '';
   /** 脑电频谱柱高度数组，由实时数据派生 */
   @State private barValues: number[] = [];
   /** 番茄钟剩余秒数（默认 25 分钟） */
@@ -134,29 +172,55 @@ struct Index {
    * 暂停番茄钟，防止页面销毁后仍计时
    */
   aboutToAppear(): void {
+    console.info('[EEG_APP] dashboard aboutToAppear');
     initSettingsStorage();
+    const filesDir: string = this.getFilesDir();
+    console.info(`[EEG_APP] filesDir=${filesDir}`);
     this.dataService.startReceiving((data: ToAppJson) => {
       this.applyToAppJson(data);
-    });
+    }, filesDir);
+  }
+
+  private getFilesDir(): string {
+    const context = getContext(this) as common.UIAbilityContext;
+    return context.filesDir;
   }
 
   private applyToAppJson(data: ToAppJson): void {
-    this.focus = data.focus ?? this.focus;
-    this.fatigue = data.fatigue ?? this.fatigue;
-    this.relax = data.relax ?? this.relax;
-    this.load = data.load ?? this.load;
-    this.quality = data.quality ?? this.quality;
-    this.confidence = data.confidence ?? this.confidence;
-    this.focusTrend = data.focusTrend ?? this.focusTrend;
-    this.fatigueTrend = data.fatigueTrend ?? this.fatigueTrend;
-    this.relaxTrend = data.relaxTrend ?? this.relaxTrend;
-    this.loadTrend = data.loadTrend ?? this.loadTrend;
-    this.state = data.state ?? this.state;
-    this.eegDirection = data.direction ?? this.eegDirection;
-    this.advice = data.advice ?? this.advice;
-    this.local = data.local ?? this.local;
-    this.model = data.model ?? this.model;
-    this.summary = data.summary ?? this.summary;
+    this.brainData = {
+      sequence: data.sequence ?? this.brainData.sequence,
+      timestamp: data.timestamp ?? this.brainData.timestamp,
+      focus: data.focus ?? this.brainData.focus,
+      fatigue: data.fatigue ?? this.brainData.fatigue,
+      relax: data.relax ?? this.brainData.relax,
+      load: data.load ?? this.brainData.load,
+      quality: data.quality ?? this.brainData.quality,
+      confidence: data.confidence ?? this.brainData.confidence,
+      focusTrend: data.focusTrend ?? this.brainData.focusTrend,
+      fatigueTrend: data.fatigueTrend ?? this.brainData.fatigueTrend,
+      relaxTrend: data.relaxTrend ?? this.brainData.relaxTrend,
+      loadTrend: data.loadTrend ?? this.brainData.loadTrend,
+      state: data.state ?? this.brainData.state,
+      mode: data.mode ?? this.brainData.mode,
+      direction: data.direction ?? this.brainData.direction,
+      advice: data.advice ?? this.brainData.advice,
+      local: data.local ?? this.brainData.local,
+      model: data.model ?? this.brainData.model,
+      summary: data.summary ?? this.brainData.summary
+    };
+    this.uiFocus = this.brainData.focus;
+    this.uiFatigue = this.brainData.fatigue;
+    this.uiRelax = this.brainData.relax;
+    this.uiLoad = this.brainData.load;
+    this.uiQuality = this.brainData.quality;
+    this.uiConfidence = this.brainData.confidence;
+    this.uiFocusTrend = this.brainData.focusTrend;
+    this.uiFatigueTrend = this.brainData.fatigueTrend;
+    this.uiRelaxTrend = this.brainData.relaxTrend;
+    this.uiLoadTrend = this.brainData.loadTrend;
+    this.uiState = this.brainData.state;
+    this.uiSequence = this.brainData.sequence;
+    this.uiAdvice = this.brainData.advice;
     this.barValues = this.createBarValues();
     this.updateHealthAlert();
   }
@@ -173,32 +237,63 @@ struct Index {
   }
 
   private healthScore(): number {
-    const signalPart: number = (this.quality + Math.round(this.confidence * 100)) / 2;
-    const balancePart: number = (this.focus + this.relax + Math.max(0, 100 - this.fatigue) + Math.max(0, 100 - this.load)) / 4;
+    const signalPart: number = (this.uiQuality + this.uiConfidence) / 2;
+    const balancePart: number = (
+      this.uiFocus +
+        this.uiRelax +
+        Math.max(0, 100 - this.uiFatigue) +
+        Math.max(0, 100 - this.uiLoad)
+    ) / 4;
     return this.clampPercent((signalPart + balancePart) / 2);
   }
 
   private suggestionText(): string {
-    return this.advice.length > 0 ? this.advice : '';
+    return this.uiAdvice.length > 0 ? this.uiAdvice : '';
+  }
+
+  private stateLabel(): string {
+    if (this.uiState === 'relaxed') {
+      return this.t('放松', 'Relaxed');
+    }
+    if (this.uiState === 'focused') {
+      return this.t('专注', 'Focused');
+    }
+    if (this.uiState === 'fatigued' || this.uiState === 'fatigue') {
+      return this.t('疲劳', 'Fatigue');
+    }
+    if (this.uiState === 'stressed' || this.uiState === 'stress' || this.brainData.mode === 'high_load') {
+      return this.t('压力偏高', 'High stress');
+    }
+    if (this.uiState === 'normal') {
+      return this.t('正常', 'Normal');
+    }
+    if (this.uiState === 'unstable') {
+      return this.t('信号不稳', 'Unstable signal');
+    }
+    return 'unknown';
+  }
+
+  private liveStatusText(): string {
+    return this.stateLabel() + ' · ' + this.uiConfidence.toString() + '% · #' + this.uiSequence.toString();
   }
 
   private summaryValue(index: number, fallback: string): string {
-    if (this.summary.length > index && this.summary[index].length > 0) {
-      return this.summary[index];
+    if (index >= 0 && this.brainData.summary.length > index && this.brainData.summary[index].length > 0) {
+      return this.brainData.summary[index];
     }
     return fallback;
   }
 
   private createBarValues(): number[] {
     const baseValues: number[] = [
-      this.focus,
-      this.fatigue,
-      this.relax,
-      this.load,
-      this.quality,
-      Math.round(this.confidence * 100)
+      this.uiFocus,
+      this.uiFatigue,
+      this.uiRelax,
+      this.uiLoad,
+      this.uiQuality,
+      this.uiConfidence
     ];
-    const modelSeed: number = this.model.length % 17;
+    const modelSeed: number = this.brainData.model.length % 17;
     const bars: number[] = [];
     for (let index = 0; index < 12; index++) {
       const source: number = baseValues[index % baseValues.length];
@@ -209,7 +304,7 @@ struct Index {
 
   private updateHealthAlert(): void {
     const lowHealth: boolean = this.healthScore() < this.healthThreshold;
-    const highFatigue: boolean = this.fatigue > this.fatigueThreshold;
+    const highFatigue: boolean = this.uiFatigue > this.fatigueThreshold;
     const hasAlert: boolean = lowHealth || highFatigue;
     if (!hasAlert) {
       this.showHealthAlert = false;
@@ -231,6 +326,7 @@ struct Index {
   }
 
   aboutToDisappear(): void {
+    console.info('[EEG_APP] dashboard aboutToDisappear');
     this.dataService.stopReceiving();
     this.pauseFocusTimer();
   }
@@ -455,9 +551,10 @@ struct Index {
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppColor.Text)
-          Text(this.t('生物信号稳定。保持节奏，需要时适当休息。', 'Bio signals are stable. Keep your rhythm and rest when needed.'))
-            .fontSize(14)
-            .fontColor(AppColor.Muted)
+          Text(this.liveStatusText())
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor((this.uiState === 'stressed' || this.uiState === 'stress') ? AppColor.Warning : AppColor.Muted)
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
@@ -482,37 +579,19 @@ struct Index {
       // ── 实时指标卡片（横向排列）──
       Row({ space: 12 }) {
         // 实时专注指数卡片
-        this.MetricCard(
-          this.t('实时专注', 'Live Focus'), this.focus.toString(), '/100',
-          AppColor.Good, this.t('实时数据', 'Live data'), this.focus, this.focusTrend
-        )
+        this.MetricCard('focus')
         // 疲劳指数卡片
-        this.MetricCard(
-          this.t('疲劳指数', 'Fatigue Index'), this.fatigue.toString(), '/100',
-          AppColor.Danger, this.t('实时数据', 'Live data'), this.fatigue, this.fatigueTrend
-        )
+        this.MetricCard('fatigue')
       }
 
       Row({ space: 12 }) {
-        this.MetricCard(
-          this.t('放松指数', 'Relax Index'), this.relax.toString(), '/100',
-          AppColor.Primary, this.t('实时数据', 'Live data'), this.relax, this.relaxTrend
-        )
-        this.MetricCard(
-          this.t('脑负荷', 'Brain Load'), this.load.toString(), '/100',
-          AppColor.Warning, this.t('实时数据', 'Live data'), this.load, this.loadTrend
-        )
+        this.MetricCard('relax')
+        this.MetricCard('load')
       }
 
       Row({ space: 12 }) {
-        this.MetricCard(
-          this.t('信号质量', 'Signal Quality'), this.quality.toString(), '/100',
-          AppColor.Good, this.t('实时数据', 'Live data'), this.quality, 0
-        )
-        this.MetricCard(
-          this.t('置信度', 'Confidence'), Math.round(this.confidence * 100).toString(), '%',
-          AppColor.Primary, this.t('实时数据', 'Live data'), Math.round(this.confidence * 100), 0
-        )
+        this.MetricCard('quality')
+        this.MetricCard('confidence')
       }
 
       // ── 脑电频谱图 ──
@@ -534,30 +613,105 @@ struct Index {
    * @param note     - 底部提示文字
    * @param progress - 进度值 (0-100)
    */
+  private metricTitle(metric: string): string {
+    if (metric === 'focus') {
+      return this.t('实时专注', 'Live Focus');
+    }
+    if (metric === 'fatigue') {
+      return this.t('疲劳指数', 'Fatigue Index');
+    }
+    if (metric === 'relax') {
+      return this.t('放松指数', 'Relax Index');
+    }
+    if (metric === 'load') {
+      return this.t('脑负荷', 'Brain Load');
+    }
+    if (metric === 'quality') {
+      return this.t('信号质量', 'Signal Quality');
+    }
+    return this.t('置信度', 'Confidence');
+  }
+
+  private metricValue(metric: string): number {
+    if (metric === 'focus') {
+      return this.uiFocus;
+    }
+    if (metric === 'fatigue') {
+      return this.uiFatigue;
+    }
+    if (metric === 'relax') {
+      return this.uiRelax;
+    }
+    if (metric === 'load') {
+      return this.uiLoad;
+    }
+    if (metric === 'quality') {
+      return this.uiQuality;
+    }
+    return this.uiConfidence;
+  }
+
+  private metricTrend(metric: string): number {
+    if (metric === 'focus') {
+      return this.uiFocusTrend;
+    }
+    if (metric === 'fatigue') {
+      return this.uiFatigueTrend;
+    }
+    if (metric === 'relax') {
+      return this.uiRelaxTrend;
+    }
+    if (metric === 'load') {
+      return this.uiLoadTrend;
+    }
+    return 0;
+  }
+
+  private metricColor(metric: string): string {
+    if (metric === 'fatigue') {
+      return AppColor.Danger;
+    }
+    if (metric === 'load') {
+      return AppColor.Warning;
+    }
+    if (metric === 'focus' || metric === 'quality') {
+      return AppColor.Good;
+    }
+    return AppColor.Primary;
+  }
+
+  private metricUnit(metric: string): string {
+    return metric === 'confidence' ? '%' : '/100';
+  }
+
+  /**
+   * 指标卡片 - 单个健康指标展示
+   * 只传固定指标类型，动态数值在 builder 内直接读取 @State，确保实时刷新。
+   */
   @Builder
-  MetricCard(title: string, value: string, unit: string, color: string, note: string, progress: number, trend: number) {
+  MetricCard(metric: string) {
     Column() {
       // 标题行：名称 + 趋势标记
       Row() {
-        Text(title)
+        Text(this.metricTitle(metric))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
           .fontColor(AppColor.Text)
         Blank()
-        Text(this.trendText(trend))
+        Text(this.trendText(this.metricTrend(metric)))
           .fontSize(12)
           .fontWeight(FontWeight.Bold)
-          .fontColor(trend < 0 ? AppColor.Danger : color)
+          .fontColor(this.metricTrend(metric) < 0 ? AppColor.Danger : this.metricColor(metric))
       }
       .width('100%')
 
       // 数值行：大号数字 + 小号单位
       Row({ space: 4 }) {
-        Text(value)
+        Text(this.metricValue(metric).toString())
           .fontSize(42)
           .fontWeight(FontWeight.Bold)
-          .fontColor(color === AppColor.Danger ? AppColor.Danger : AppColor.Text)
-        Text(unit)
+          .fontColor(this.metricColor(metric) === AppColor.Danger ? AppColor.Danger : AppColor.Text)
+        Text(this.metricUnit(metric))
           .fontSize(12)
           .fontColor(AppColor.Muted)
       }
@@ -565,15 +719,15 @@ struct Index {
       .margin({ top: 20 })
 
       // 线性进度条（0-100%）
-      Progress({ value: this.clampPercent(progress), total: 100, type: ProgressType.Linear })
+      Progress({ value: this.clampPercent(this.metricValue(metric)), total: 100, type: ProgressType.Linear })
         .height(8)
-        .color(color)
+        .color(this.metricColor(metric))
         .margin({ top: 16 })
 
       // 底部提示
-      Text(note)
+      Text(this.t('实时数据', 'Live data'))
         .fontSize(11)
-        .fontColor(color)
+        .fontColor(this.metricColor(metric))
         .margin({ top: 8 })
     }
     .alignItems(HorizontalAlign.Start)
@@ -582,7 +736,7 @@ struct Index {
     .padding(14)
     .backgroundColor(AppColor.Card)
     .borderRadius(16)
-    .border({ width: 1, color: color === AppColor.Danger ? '#33FF4D4F' : AppColor.Border })
+    .border({ width: 1, color: this.metricColor(metric) === AppColor.Danger ? '#33FF4D4F' : AppColor.Border })
   }
 
   /**
@@ -597,11 +751,11 @@ struct Index {
         .fontWeight(FontWeight.Bold)
         .fontColor(AppColor.Text)
       // Alpha 波：放松状态，主题色
-      this.WaveRow('Alpha', this.relax, AppColor.Primary)
+      this.WaveRow('alpha')
       // Theta 波：认知负荷/内省状态
-      this.WaveRow('Theta', this.load, AppColor.Good)
+      this.WaveRow('theta')
       // Beta 波：活跃思考/疲劳压力
-      this.WaveRow('Beta', this.fatigue, AppColor.Warning)
+      this.WaveRow('beta')
     }
     .alignItems(HorizontalAlign.Start)
     .padding(14)
@@ -616,22 +770,52 @@ struct Index {
    * @param value - 强度百分比 (0-100)
    * @param color - 显示颜色
    */
+  private waveLabel(wave: string): string {
+    if (wave === 'alpha') {
+      return 'Alpha';
+    }
+    if (wave === 'theta') {
+      return 'Theta';
+    }
+    return 'Beta';
+  }
+
+  private waveValue(wave: string): number {
+    if (wave === 'alpha') {
+      return this.uiRelax;
+    }
+    if (wave === 'theta') {
+      return this.uiLoad;
+    }
+    return this.uiFatigue;
+  }
+
+  private waveColor(wave: string): string {
+    if (wave === 'alpha') {
+      return AppColor.Primary;
+    }
+    if (wave === 'theta') {
+      return AppColor.Good;
+    }
+    return AppColor.Warning;
+  }
+
   @Builder
-  WaveRow(label: string, value: number, color: string) {
+  WaveRow(wave: string) {
     Row({ space: 12 }) {
-      Text(label)
+      Text(this.waveLabel(wave))
         .width(58)
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
         .fontColor(AppColor.Text)
-      Progress({ value: value, total: 100, type: ProgressType.Linear })
+      Progress({ value: this.waveValue(wave), total: 100, type: ProgressType.Linear })
         .layoutWeight(1)
         .height(6)
-        .color(color)
-      Text(value.toString() + '%')
+        .color(this.waveColor(wave))
+      Text(this.waveValue(wave).toString() + '%')
         .width(42)
         .fontSize(12)
-        .fontColor(color)
+        .fontColor(this.waveColor(wave))
     }
     .width('100%')
   }
@@ -985,7 +1169,7 @@ struct Index {
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Text)
         Blank()
-        Text(this.focus.toString() + '%')
+        Text(this.uiFocus.toString() + '%')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Primary)
@@ -993,7 +1177,7 @@ struct Index {
       .width('100%')
 
       // 进度条
-      Progress({ value: this.focus, total: 100, type: ProgressType.Linear })
+      Progress({ value: this.uiFocus, total: 100, type: ProgressType.Linear })
         .height(8)
         .color(AppColor.Primary)
 
@@ -1116,7 +1300,7 @@ struct Index {
       // ── 统计汇总卡片（今日专注 + 平均疲劳）──
       Row({ space: 12 }) {
         SummaryCard({ title: this.t('今日专注', 'Today Focus'), value: this.summaryValue(0, '0'), color: AppColor.Primary })
-        SummaryCard({ title: this.t('平均疲劳', 'Avg Fatigue'), value: this.summaryValue(1, this.fatigue.toString() + ' /100'), color: AppColor.Warning })
+        SummaryCard({ title: this.t('平均疲劳', 'Avg Fatigue'), value: this.summaryValue(1, this.uiFatigue.toString() + ' /100'), color: AppColor.Warning })
       }
 
     }

@@ -11,6 +11,10 @@
     {
       "name": "entryability_desc",
       "value": "HealthSync main ability"
+    },
+    {
+      "name": "read_media_reason",
+      "value": "用于读取健康数据相关图片"
     }
   ]
 }
