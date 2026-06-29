@@ -3,17 +3,25 @@ export const SettingsDefaults = {
   autoReconnect: true,
   cloudSync: true,
   keepScreenOn: false,
-  healthThreshold: 40,
+  warningEnabled: true,
+  focusThreshold: 40,
   fatigueThreshold: 80,
+  qualityThreshold: 40,
+  confidenceThreshold: 40,
   bgStyle: 0
 };
 
 export function initSettingsStorage(): void {
-  AppStorage.SetOrCreate('language', SettingsDefaults.language);
+  if (!AppStorage.Has('language')) {
+    AppStorage.SetOrCreate('language', SettingsDefaults.language);
+  }
   AppStorage.SetOrCreate('autoReconnect', SettingsDefaults.autoReconnect);
   AppStorage.SetOrCreate('cloudSync', SettingsDefaults.cloudSync);
   AppStorage.SetOrCreate('keepScreenOn', SettingsDefaults.keepScreenOn);
-  AppStorage.SetOrCreate('healthThreshold', SettingsDefaults.healthThreshold);
+  AppStorage.SetOrCreate('warningEnabled', SettingsDefaults.warningEnabled);
+  AppStorage.SetOrCreate('focusThreshold', SettingsDefaults.focusThreshold);
   AppStorage.SetOrCreate('fatigueThreshold', SettingsDefaults.fatigueThreshold);
+  AppStorage.SetOrCreate('qualityThreshold', SettingsDefaults.qualityThreshold);
+  AppStorage.SetOrCreate('confidenceThreshold', SettingsDefaults.confidenceThreshold);
   AppStorage.SetOrCreate('bgStyle', SettingsDefaults.bgStyle);
 }

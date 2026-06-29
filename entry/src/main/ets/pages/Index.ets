@@ -1,11 +1,3 @@
-import { BottomNav } from '../components/BottomNav';
-import { SummaryCard } from '../components/SummaryCard';
-import { TopBar } from '../components/TopBar';
-import { DataService, ToAppJson } from '../data/DataService';
-import { AppColor } from '../theme/AppColor';
-import { initSettingsStorage } from '../store/SettingsStore';
-import common from '@ohos.app.ability.common';
-
 /**
  * ============================================================================
  * Index.ets - HealthSync AI 健康监测应用主页面
@@ -13,55 +5,76 @@ import common from '@ohos.app.ability.common';
  *
  * 功能概述：
  *   基于 HarmonyOS ArkUI 框架构建的 AI 健康监测应用主界面，
- *   提供脑电(EEG)数据分析、专注计时和健康建议等核心功能。
+ *   提供脑电(EEG)数据分析、专注计时、运动追踪等核心功能。
  *
- * 页面架构（2 个 Tab 页签）：
+ * 页面架构（4 个 Tab 页签）：
  *   1. 仪表盘 (Dashboard)  - 健康状态总览、实时专注/疲劳指标、脑电频谱、AI 建议
  *   2. 专注    (Focus)       - 番茄钟计时器、实时专注数据、休息建议
+ *   3. 运动    (Sports)      - 心率/步频/卡路里监测、专注状态、路线预览
+ *   4. 个人    (Profile)     - 用户信息、设备管理、系统设置、背景样式切换
  *
  * 技术栈：
  *   - ArkTS 声明式 UI + @Component/@Builder 组件化架构
- *   - @State 组件内响应式状态 + 部分设置用 @StorageLink 共享
+ *   - @State 组件内响应式状态（未使用 @StorageLink）
  *   - 中英双语国际化支持（默认中文）
  *   - 自定义 AppColor 设计系统
  *
  * 文件结构（按 @Builder 顺序）：
  *   AppColor → Index struct → TopBar → DashboardPage → MetricCard
  *   → SpectrumCard → WaveRow → SuggestionCard → FocusPage → FocusDataCard
- *   → RestAdviceCard → Tag → ProfilePage(未使用) → SummaryCard → BottomNav
+ *   → RestAdviceCard → Tag → SportsPage → SportMetric → ProfilePage
+ *   → SummaryCard → MenuRow → SettingsPanel → LanguageSelector → InputLike
+ *   → Toggle/Switch/Slider 组件 → BackgroundPicker → BackgroundOption → BottomNav
  *   → TabItem 辅助类
  */
 
+import { DataService, ToAppJson } from '../data/DataService';
+import { DemoDataService } from '../data/DemoDataService';
+import { SIMULATOR_DEMO_MODE } from '../config/config';
+
+// ============================================================================
+// AppColor - 应用全局颜色设计系统
+// ============================================================================
+// 定义统一的色板常量，确保全应用视觉风格一致
+class AppColor {
+  /** 主题色 - 深蓝，用于按钮、链接、选中状态等 */
+  static readonly Primary: string = '#0054CB';
+  /** 主题色浅色版 - 淡蓝，用于背景高亮、图标底色 */
+  static readonly PrimarySoft: string = '#DAE2FF';
+  /** 表面色 - 浅灰蓝，用于卡片背景、区域底色 */
+  static readonly Surface: string = '#F9F9FF';
+  /** 卡片色 - 浅灰，用于内容区卡片 */
+  static readonly Card: string = '#F8F9FC';
+  /** 纯白色 */
+  static readonly White: string = '#FFFFFF';
+  /** 主文字色 - 深灰黑 */
+  static readonly Text: string = '#0F1C2F';
+  /** 次要文字色 - 中灰，用于副标题、说明文字 */
+  static readonly Muted: string = '#556477';
+  /** 边框色 - 浅灰 */
+  static readonly Border: string = '#EBEDEF';
+  /** 正向色 - 绿色，用于正常/良好状态指标 */
+  static readonly Good: string = '#2DC973';
+  /** 警告色 - 橙色 */
+  static readonly Warning: string = '#FF8A4C';
+  /** 危险色 - 红色，用于警告/异常状态 */
+  static readonly Danger: string = '#FF4D4F';
+  /** 玻璃卡片底色 - 高透明白色 */
+  static readonly Glass: string = '#EFFFFFFF';
+  /** 强玻璃卡片底色 - 更高可读性 */
+  static readonly GlassStrong: string = '#F8FFFFFF';
+  /** 健康科技青色 */
+  static readonly Cyan: string = '#00A6A6';
+  /** 柔和紫色，用于 AI 模块 */
+  static readonly Violet: string = '#6B5CFF';
+}
+
 /** 番茄钟默认时长（25 分钟），与 Progress 环 total 默认值一致 */
 const DEFAULT_FOCUS_SEC: number = 1500;
-/** 自定义专注时长下限（1 分钟） */
-const MIN_FOCUS_SEC: number = 60;
 /** 自定义专注时长上限（24 小时） */
 const MAX_FOCUS_SEC: number = 86400;
-/** 自定义时长步进（5 分钟） */
-const FOCUS_STEP_SEC: number = 300;
-
-interface BrainData {
-  sequence: number;
-  timestamp?: number;
-  focus: number;
-  fatigue: number;
-  relax: number;
-  load: number;
-  quality: number;
-  confidence: number;
-  focusTrend: number;
-  fatigueTrend: number;
-  relaxTrend: number;
-  loadTrend: number;
-  state: string;
-  mode: string;
-  direction: string;
-  advice: string;
-  local: boolean;
-  model: string;
-  summary: string[];
-}
+/** 同一类安全提醒的冷却时间，避免轮询数据反复打断用户 */
+const ALERT_COOLDOWN_MS: number = 60000;
 
 // ============================================================================
 // Index - 应用主组件（@Entry 入口 + @Component 自定义组件）
@@ -75,41 +88,50 @@ struct Index {
 
   /** 当前选中的标签页索引：0=仪表盘, 1=专注 */
   @State private currentTab: number = 0;
-  @State private brainData: BrainData = {
-    sequence: 0,
-    focus: 0,
-    fatigue: 0,
-    relax: 0,
-    load: 0,
-    quality: 0,
-    confidence: 0,
-    focusTrend: 0,
-    fatigueTrend: 0,
-    relaxTrend: 0,
-    loadTrend: 0,
-    state: 'unknown',
-    mode: '',
-    direction: '',
-    advice: '',
-    local: true,
-    model: '',
-    summary: []
-  };
-  @State private uiFocus: number = 0;
-  @State private uiFatigue: number = 0;
-  @State private uiRelax: number = 0;
-  @State private uiLoad: number = 0;
-  @State private uiQuality: number = 0;
-  @State private uiConfidence: number = 0;
-  @State private uiFocusTrend: number = 0;
-  @State private uiFatigueTrend: number = 0;
-  @State private uiRelaxTrend: number = 0;
-  @State private uiLoadTrend: number = 0;
-  @State private uiState: string = 'unknown';
-  @State private uiSequence: number = 0;
-  @State private uiAdvice: string = '';
-  /** 脑电频谱柱高度数组，由实时数据派生 */
-  @State private barValues: number[] = [];
+  /** 专注指数 (0-100)，从脑电数据实时计算 */
+  @State private focusScore: number = 0;
+  /** 疲劳指数 (0-100)，数值越高越疲劳 */
+  @State private fatigueScore: number = 0;
+  /** 放松指数 (0-100)，来自 ToApp.json */
+  @State private relaxScore: number = 0;
+  /** 脑负荷指数 (0-100)，来自 ToApp.json */
+  @State private loadScore: number = 0;
+  /** 信号质量 (0-100)，来自 ToApp.json */
+  @State private qualityScore: number = 0;
+  /** 模型置信度 (0-1)，来自 ToApp.json */
+  @State private confidence: number = 0;
+  /** AI 智能建议，来自 ToApp.json 的 advice 字段 */
+  @State private advice: string = 'Waiting for EEG data. No data source connected.';
+  /** 后端连接状态 */
+  @State private connectionStatus: string = 'waiting';
+  /** 最近一次同步序号 */
+  @State private lastUpdateSequence: number = 0;
+  /** 当前是否已经读到真实链路或测试脚本写入的数据 */
+  @State private hasEegData: boolean = false;
+  /** 当前数据来源：uart / ch340 / real_adc / none 等 */
+  @State private dataSource: string = 'none';
+  /** 当前数据源细分标记 */
+  @State private source: string = 'no_data';
+  /** 当前 ToApp/currentData 状态字段 */
+  @State private dataState: string = 'waiting';
+  @State private channelMode: string = 'unknown';
+  /** CH1 是否有效 */
+  @State private ch1Valid: boolean = false;
+  /** CH2 是否有效 */
+  @State private ch2Valid: boolean = false;
+  /** 通道状态 */
+  @State private channelStatus: string = 'not_connected';
+  /** 当前趋势方向，来自 ToApp.json 的 direction 字段 */
+  @State private directionText: string = 'no_data';
+  /** 本地模型名称，来自 ToApp.json 的 model 字段 */
+  @State private modelName: string = 'none';
+  /** 是否为本地推理，来自 ToApp.json 的 local 字段 */
+  @State private localInference: boolean = false;
+  /** 指标趋势，来自 ToApp.json 的 trend 字段 */
+  @State private focusTrend: number = 0;
+  @State private fatigueTrend: number = 0;
+  @State private relaxTrend: number = 0;
+  @State private loadTrend: number = 0;
   /** 番茄钟剩余秒数（默认 25 分钟） */
   @State private timerSeconds: number = DEFAULT_FOCUS_SEC;
   /** 番茄钟设定的总时长（秒），可由自定义弹窗修改 */
@@ -118,22 +140,45 @@ struct Index {
   @State private timerRunning: boolean = false;
   /** 是否显示自定义专注时长弹窗 */
   @State private showDurationDialog: boolean = false;
-  /** 是否显示健康/疲劳警告弹窗 */
-  @State private showHealthAlert: boolean = false;
-  @State private alertLowHealth: boolean = false;
-  @State private alertHighFatigue: boolean = false;
-  private alertMuted: boolean = false;
-  private lastAlertActive: boolean = false;
-  /** 弹窗内临时选择的专注时长（秒） */
-  @State private draftDurationSec: number = DEFAULT_FOCUS_SEC;
+  /** 是否显示设置面板 */
+  @State private showSettingsPanel: boolean = false;
+  /** 刷新模式：manual=手动，auto=自动 */
+  @State private refreshMode: string = 'auto';
+  /** 弹窗内滚轮选中的时长（时/分映射为 Date；兼容 API 10） */
+  @State private draftDurationDate: Date = new Date(1970, 0, 1, 0, 25, 0);
+  /** 是否启用设备自动重连 */
+  @StorageLink('autoReconnect') private autoReconnect: boolean = true;
+  /** 是否启用云端数据同步 */
+  @StorageLink('cloudSync') private cloudSync: boolean = true;
+  /** 是否保持屏幕常亮（运动模式下默认关闭） */
+  @StorageLink('keepScreenOn') private keepScreenOn: boolean = false;
+  /** 是否启用脑电安全警告 */
+  @StorageLink('warningEnabled') private warningEnabled: boolean = true;
+  /** 专注警告阈值（百分比，低于此值触发提醒） */
+  @StorageLink('focusThreshold') private focusThreshold: number = 40;
+  /** 疲劳警告阈值（百分比，高于此值触发提醒） */
+  @StorageLink('fatigueThreshold') private fatigueThreshold: number = 80;
+  /** 信号质量警告阈值（低于此值触发提醒） */
+  @StorageLink('qualityThreshold') private qualityThreshold: number = 40;
+  /** 数据置信度警告阈值（低于此值触发提醒） */
+  @StorageLink('confidenceThreshold') private confidenceThreshold: number = 40;
+  /** 背景样式索引：0=白色, 1=蓝色, 2=暖色 */
+  @StorageLink('bgStyle') private bgStyle: number = 0;
+  /** 是否显示全屏安全警告 */
+  @State private showSafetyAlert: boolean = false;
+  @State private alertTitle: string = '';
+  @State private alertMessage: string = '';
+  @State private alertDetail: string = '';
+  @State private alertFocus: number = 0;
+  @State private alertFatigue: number = 0;
+  @State private alertQuality: number = 0;
+
   // ──────────────────────────────────────────────────────────────────────────
   // 语言设置（0=中文, 1=English，默认中文）
   // ──────────────────────────────────────────────────────────────────────────
 
   /** 当前语言：0=中文, 1=English */
   @StorageLink('language') private language: number = 0;
-  @StorageLink('healthThreshold') private healthThreshold: number = 40;
-  @StorageLink('fatigueThreshold') private fatigueThreshold: number = 80;
 
   // ──────────────────────────────────────────────────────────────────────────
   // 私有成员变量
@@ -141,7 +186,11 @@ struct Index {
 
   /** 番茄钟 setTimeout 链 ID（-1 表示无待执行 tick） */
   private focusTimerId: number = -1;
-  private dataService: DataService = new DataService();
+  /** 最近一次已处理警告的时间与数据序号 */
+  private lastAlertTime: number = 0;
+  private lastAlertSequence: number = -1;
+  /** 脑电指标波柱高度数组；无数据时保持低位，避免伪装实时波形 */
+  private barValues: number[] = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4];
 
   // ==========================================================================
   // 国际化辅助方法
@@ -160,73 +209,352 @@ struct Index {
 
   /**
    * 获取指定 Tab 页签的翻译名称
-   * @param index - Tab 索引 (0-2)
+   * @param index - Tab 索引 (0-3)
    * @returns 对应语言的标签名
    */
+  private getTabName(index: number): string {
+    if (this.language === 0) {
+      const zhNames: string[] = ['仪表盘', '专注'];
+      return zhNames[index];
+    }
+    const enNames: string[] = ['Dashboard', 'Focus'];
+    return enNames[index];
+  }
+
   // ==========================================================================
   // 生命周期方法
   // ==========================================================================
 
-  /**
-   * 组件即将销毁时调用
-   * 暂停番茄钟，防止页面销毁后仍计时
-   */
   aboutToAppear(): void {
-    console.info('[EEG_APP] dashboard aboutToAppear');
-    initSettingsStorage();
-    const filesDir: string = this.getFilesDir();
-    console.info(`[EEG_APP] filesDir=${filesDir}`);
-    this.dataService.startReceiving((data: ToAppJson) => {
-      this.applyToAppJson(data);
-    }, filesDir);
-  }
-
-  private getFilesDir(): string {
-    const context = getContext(this) as common.UIAbilityContext;
-    return context.filesDir;
+    if (this.refreshMode === 'auto') {
+      this.startAutoRefresh();
+    } else {
+      this.stopAutoRefresh();
+      this.refreshEegDataOnce();
+    }
   }
 
   private applyToAppJson(data: ToAppJson): void {
-    this.brainData = {
-      sequence: data.sequence ?? this.brainData.sequence,
-      timestamp: data.timestamp ?? this.brainData.timestamp,
-      focus: data.focus ?? this.brainData.focus,
-      fatigue: data.fatigue ?? this.brainData.fatigue,
-      relax: data.relax ?? this.brainData.relax,
-      load: data.load ?? this.brainData.load,
-      quality: data.quality ?? this.brainData.quality,
-      confidence: data.confidence ?? this.brainData.confidence,
-      focusTrend: data.focusTrend ?? this.brainData.focusTrend,
-      fatigueTrend: data.fatigueTrend ?? this.brainData.fatigueTrend,
-      relaxTrend: data.relaxTrend ?? this.brainData.relaxTrend,
-      loadTrend: data.loadTrend ?? this.brainData.loadTrend,
-      state: data.state ?? this.brainData.state,
-      mode: data.mode ?? this.brainData.mode,
-      direction: data.direction ?? this.brainData.direction,
-      advice: data.advice ?? this.brainData.advice,
-      local: data.local ?? this.brainData.local,
-      model: data.model ?? this.brainData.model,
-      summary: data.summary ?? this.brainData.summary
-    };
-    this.uiFocus = this.brainData.focus;
-    this.uiFatigue = this.brainData.fatigue;
-    this.uiRelax = this.brainData.relax;
-    this.uiLoad = this.brainData.load;
-    this.uiQuality = this.brainData.quality;
-    this.uiConfidence = this.brainData.confidence;
-    this.uiFocusTrend = this.brainData.focusTrend;
-    this.uiFatigueTrend = this.brainData.fatigueTrend;
-    this.uiRelaxTrend = this.brainData.relaxTrend;
-    this.uiLoadTrend = this.brainData.loadTrend;
-    this.uiState = this.brainData.state;
-    this.uiSequence = this.brainData.sequence;
-    this.uiAdvice = this.brainData.advice;
-    this.barValues = this.createBarValues();
-    this.updateHealthAlert();
+    this.dataSource = this.readLabel(data.dataSource, 'none');
+    this.source = typeof data.source === 'string' ? this.readLabel(data.source, 'no_data') : 'no_data';
+    this.dataState = this.readLabel(data.state, this.dataSource === 'none' ? 'waiting' : 'active');
+    this.channelMode = this.readLabel(data.channelMode, this.dataSource === 'none' ? 'unknown' : 'single_channel');
+    this.ch1Valid = data.ch1Valid === true;
+    this.ch2Valid = data.ch2Valid === true;
+    this.channelStatus = this.readLabel(typeof data.channelStatus === 'string' ? data.channelStatus : undefined,
+      this.dataSource === 'none' ? 'not_connected' : 'active');
+    this.directionText = this.readLabel(data.direction, this.dataSource === 'none' ? 'no_data' : 'stable');
+    this.modelName = this.readLabel(data.model, this.dataSource === 'none' ? 'none' : 'local_model');
+    this.localInference = data.local === true;
+    this.focusTrend = this.readTrend(data.focusTrend, 0);
+    this.fatigueTrend = this.readTrend(data.fatigueTrend, 0);
+    this.relaxTrend = this.readTrend(data.relaxTrend, 0);
+    this.loadTrend = this.readTrend(data.loadTrend, 0);
+
+    const noDataPayload = this.dataSource === 'none' || this.source === 'no_data';
+    this.hasEegData = !noDataPayload && this.hasDisplayableEegData(data);
+
+    if (!this.hasEegData) {
+      this.focusScore = 0;
+      this.fatigueScore = 0;
+      this.relaxScore = 0;
+      this.loadScore = 0;
+      this.qualityScore = 0;
+      this.confidence = 0;
+      this.lastUpdateSequence = 0;
+      this.focusTrend = 0;
+      this.fatigueTrend = 0;
+      this.relaxTrend = 0;
+      this.loadTrend = 0;
+      this.advice = this.readLabel(data.advice, 'Waiting for EEG data. No data source connected.');
+      this.connectionStatus = 'no_data';
+      this.resetBarValues();
+      return;
+    }
+
+    this.focusScore = this.readPercent(data.focus, 0);
+    this.fatigueScore = this.readPercent(data.fatigue, 0);
+    this.relaxScore = this.readPercent(data.relax, 0);
+    this.loadScore = this.readPercent(data.load, 0);
+    this.qualityScore = this.readPercent(data.quality, 0);
+    this.confidence = this.readConfidence(data.confidence, 0);
+    this.lastUpdateSequence = this.readSequence(data.sequence, 0);
+    this.advice = this.readLabel(data.advice, 'EEG data loaded successfully.');
+    this.connectionStatus = 'connected';
+    this.updateBarValues();
+    this.checkSafetyAlert();
   }
 
-  private clampPercent(value: number): number {
+  /** 根据用户设置的阈值检查实时脑电数据，沿用 ToPAD 的优先级与冷却策略 */
+  private checkSafetyAlert(): void {
+    if (!this.warningEnabled || !this.hasEegData || this.showSafetyAlert) {
+      return;
+    }
+    if (this.lastUpdateSequence === this.lastAlertSequence) {
+      return;
+    }
+    const now: number = Date.now();
+    if (now - this.lastAlertTime < ALERT_COOLDOWN_MS) {
+      return;
+    }
+    if (this.fatigueScore >= this.fatigueThreshold) {
+      this.presentSafetyAlert(
+        this.t('高疲劳警告', 'High Fatigue Warning'),
+        this.t('检测到疲劳风险过高', 'High fatigue risk detected'),
+        this.t('疲劳度已超过设定阈值，建议立即暂停训练并休息。',
+          'Fatigue exceeded your threshold. Pause training and take a break.')
+      );
+      return;
+    }
+    if (this.focusScore <= this.focusThreshold) {
+      this.presentSafetyAlert(
+        this.t('专注提醒', 'Focus Alert'),
+        this.t('当前专注度过低', 'Focus is below target'),
+        this.t('专注度低于设定阈值，建议调整状态后再继续。',
+          'Focus is below your threshold. Reset before continuing.')
+      );
+      return;
+    }
+    if (this.qualityScore <= this.qualityThreshold) {
+      this.presentSafetyAlert(
+        this.t('信号质量提醒', 'Signal Quality Alert'),
+        this.t('当前信号质量较差', 'Signal quality is low'),
+        this.t('数据可能不准确，请检查电极接触和设备佩戴。',
+          'Readings may be inaccurate. Check electrode contact and device fit.')
+      );
+      return;
+    }
+    if (Math.round(this.confidence * 100) <= this.confidenceThreshold) {
+      this.presentSafetyAlert(
+        this.t('数据可信度提醒', 'Confidence Alert'),
+        this.t('当前数据可信度较低', 'Data confidence is low'),
+        this.t('请检查设备连接和佩戴状态，再继续本次监测。',
+          'Check the device connection and fit before continuing.')
+      );
+    }
+  }
+
+  private presentSafetyAlert(title: string, message: string, detail: string): void {
+    this.alertTitle = title;
+    this.alertMessage = message;
+    this.alertDetail = detail;
+    this.alertFocus = this.focusScore;
+    this.alertFatigue = this.fatigueScore;
+    this.alertQuality = this.qualityScore;
+    this.showSafetyAlert = true;
+  }
+
+  private dismissSafetyAlert(): void {
+    this.lastAlertTime = Date.now();
+    this.lastAlertSequence = this.lastUpdateSequence;
+    this.showSafetyAlert = false;
+  }
+
+  /** 设置页测试入口：只预览警告，不覆盖实时 EEG 状态 */
+  private previewSafetyAlert(): void {
+    this.alertTitle = this.t('高疲劳警告', 'High Fatigue Warning');
+    this.alertMessage = this.t('检测到疲劳风险过高', 'High fatigue risk detected');
+    this.alertDetail = this.t('这是安全警告预览。实际监测中超过阈值时会自动显示。',
+      'This is a safety alert preview. It appears automatically when a threshold is crossed.');
+    this.alertFocus = this.hasEegData ? this.focusScore : 28;
+    this.alertFatigue = this.hasEegData ? this.fatigueScore : 86;
+    this.alertQuality = this.hasEegData ? this.qualityScore : 62;
+    this.showSettingsPanel = false;
+    this.showSafetyAlert = true;
+  }
+
+  private appBackgroundColor(): string {
+    if (this.bgStyle === 1) {
+      return '#E8F2FF';
+    }
+    if (this.bgStyle === 2) {
+      return '#FFF4E8';
+    }
+    return '#EEF7F7';
+  }
+
+  private hasDisplayableEegData(data: ToAppJson): boolean {
+    return typeof data.focus === 'number'
+      || typeof data.fatigue === 'number'
+      || typeof data.relax === 'number'
+      || typeof data.load === 'number'
+      || typeof data.quality === 'number'
+      || (data.state !== undefined && data.state.length > 0);
+  }
+
+  private readLabel(value: string | undefined, fallback: string): string {
+    if (value === undefined || value.length === 0) {
+      return fallback;
+    }
+    return value;
+  }
+
+  private readPercent(value: number | undefined, fallback: number): number {
+    if (typeof value !== 'number' || value !== value) {
+      return fallback;
+    }
     return Math.max(0, Math.min(100, Math.round(value)));
+  }
+
+  private readConfidence(value: number | undefined, fallback: number): number {
+    if (typeof value !== 'number' || value !== value) {
+      return fallback;
+    }
+    return Math.max(0, Math.min(1, value));
+  }
+
+  private readSequence(value: number | undefined, fallback: number): number {
+    if (typeof value !== 'number' || value !== value) {
+      return fallback;
+    }
+    return Math.max(0, Math.round(value));
+  }
+
+  private readTrend(value: number | undefined, fallback: number): number {
+    if (typeof value !== 'number' || value !== value) {
+      return fallback;
+    }
+    if (value > 0) {
+      return 1;
+    }
+    if (value < 0) {
+      return -1;
+    }
+    return 0;
+  }
+
+  private refreshEegDataOnce(): void {
+    if (SIMULATOR_DEMO_MODE) {
+      DemoDataService.getInstance().setLanguage(this.language);
+      DemoDataService.getInstance().refreshOnce((data: ToAppJson) => {
+        this.applyToAppJson(data);
+      });
+    } else {
+      DataService.getInstance().refreshOnce((data: ToAppJson) => {
+        this.applyToAppJson(data);
+      }, (_msg: string) => {
+        this.connectionStatus = 'no_data';
+      });
+    }
+  }
+
+  private startAutoRefresh(): void {
+    if (SIMULATOR_DEMO_MODE) {
+      DemoDataService.getInstance().setLanguage(this.language);
+      DemoDataService.getInstance().startReceiving((data: ToAppJson) => {
+        this.applyToAppJson(data);
+      }, undefined, 1000);
+    } else {
+      DataService.getInstance().startReceiving((data: ToAppJson) => {
+        this.applyToAppJson(data);
+      }, (_msg: string) => {
+        this.connectionStatus = 'no_data';
+      }, 5000);
+    }
+  }
+
+  private stopAutoRefresh(): void {
+    if (SIMULATOR_DEMO_MODE) {
+      DemoDataService.getInstance().stopReceiving();
+    } else {
+      DataService.getInstance().stopReceiving();
+    }
+  }
+
+  private switchToManualRefresh(): void {
+    if (this.refreshMode === 'manual') {
+      return;
+    }
+    this.refreshMode = 'manual';
+    this.stopAutoRefresh();
+  }
+
+  private switchToAutoRefresh(): void {
+    this.refreshMode = 'auto';
+    this.startAutoRefresh();
+  }
+  private connectionNote(): string {
+    if (this.connectionStatus === 'connected') {
+      return this.t('ToApp已同步 #' + this.lastUpdateSequence.toString() + ' | 来源 ' + this.dataSource,
+        'ToApp synced #' + this.lastUpdateSequence.toString() + ' | source ' + this.dataSource);
+    }
+    if (this.connectionStatus === 'no_data') {
+      return this.t('等待脑电数据 | 数据来源 none', 'Waiting for EEG data | source none');
+    }
+    return this.t('正在连接ToApp服务', 'Connecting ToApp service');
+  }
+
+  private metricText(value: number): string {
+    return this.hasEegData ? value.toString() : '--';
+  }
+
+  private metricProgress(value: number): number {
+    return this.hasEegData ? value : 0;
+  }
+
+  private sourceColor(): string {
+    if (!this.hasEegData) {
+      return AppColor.Warning;
+    }
+    return AppColor.Good;
+  }
+
+  private dataSourceNote(): string {
+    return this.t('数据来源：' + this.dataSource + ' / ' + this.source,
+      'Data source: ' + this.dataSource + ' / ' + this.source);
+  }
+  private adviceText(): string {
+    if (this.advice.length === 0) {
+      return this.t('暂未读取到脑电数据，请检查香橙派链路或 ToApp.json。', 'Waiting for EEG data. No data source connected.');
+    }
+    if (SIMULATOR_DEMO_MODE && this.language === 1) {
+      return DemoDataService.getInstance().getAdviceEn(this.advice);
+    }
+    if (SIMULATOR_DEMO_MODE && this.language === 0) {
+      return DemoDataService.getInstance().getAdviceZh(this.advice);
+    }
+    return this.advice;
+  }
+
+  private coreHealthScore(): number {
+    if (!this.hasEegData) {
+      return 0;
+    }
+    const score = this.focusScore * 0.35
+      + (100 - this.fatigueScore) * 0.25
+      + this.relaxScore * 0.15
+      + (100 - this.loadScore) * 0.10
+      + this.qualityScore * 0.15;
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  private displayStateText(): string {
+    if (!this.hasEegData) {
+      return this.t('等待脑电数据', 'Waiting for EEG data');
+    }
+    if (this.dataState === 'focused') {
+      return this.t('专注', 'Focused');
+    }
+    if (this.dataState === 'fatigue_rising') {
+      return this.t('疲劳上升', 'Fatigue Rising');
+    }
+    if (this.dataState === 'fatigue' || this.dataState === 'fatigue_high') {
+      return this.t('疲劳', 'Fatigue');
+    }
+    if (this.dataState === 'relaxed') {
+      return this.t('放松', 'Relaxed');
+    }
+    return this.dataState;
+  }
+
+  private trendSymbol(value: number): string {
+    if (value > 0) {
+      return '↑';
+    }
+    if (value < 0) {
+      return '↓';
+    }
+    return '→';
   }
 
   private trendText(value: number): string {
@@ -236,98 +564,54 @@ struct Index {
     return value.toString();
   }
 
-  private healthScore(): number {
-    const signalPart: number = (this.uiQuality + this.uiConfidence) / 2;
-    const balancePart: number = (
-      this.uiFocus +
-        this.uiRelax +
-        Math.max(0, 100 - this.uiFatigue) +
-        Math.max(0, 100 - this.uiLoad)
-    ) / 4;
-    return this.clampPercent((signalPart + balancePart) / 2);
+  private trendLabel(trend: number): string {
+    if (!this.hasEegData) {
+      return '--';
+    }
+    if (trend > 0) {
+      return this.t('↑ 上升', '↑ Rising');
+    }
+    if (trend < 0) {
+      return this.t('↓ 下降', '↓ Falling');
+    }
+    return this.t('→ 稳定', '→ Stable');
   }
 
-  private suggestionText(): string {
-    return this.uiAdvice.length > 0 ? this.uiAdvice : '';
+  private confidencePercentText(): string {
+    return this.hasEegData ? Math.round(this.confidence * 100).toString() : '--';
   }
 
-  private stateLabel(): string {
-    if (this.uiState === 'relaxed') {
-      return this.t('放松', 'Relaxed');
-    }
-    if (this.uiState === 'focused') {
-      return this.t('专注', 'Focused');
-    }
-    if (this.uiState === 'fatigued' || this.uiState === 'fatigue') {
-      return this.t('疲劳', 'Fatigue');
-    }
-    if (this.uiState === 'stressed' || this.uiState === 'stress' || this.brainData.mode === 'high_load') {
-      return this.t('压力偏高', 'High stress');
-    }
-    if (this.uiState === 'normal') {
-      return this.t('正常', 'Normal');
-    }
-    if (this.uiState === 'unstable') {
-      return this.t('信号不稳', 'Unstable signal');
-    }
-    return 'unknown';
+  private confidenceProgress(): number {
+    return this.hasEegData ? Math.round(this.confidence * 100) : 0;
   }
 
-  private liveStatusText(): string {
-    return this.stateLabel() + ' · ' + this.uiConfidence.toString() + '% · #' + this.uiSequence.toString();
+  private resetBarValues(): void {
+    this.barValues = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4];
   }
 
-  private summaryValue(index: number, fallback: string): string {
-    if (index >= 0 && this.brainData.summary.length > index && this.brainData.summary[index].length > 0) {
-      return this.brainData.summary[index];
-    }
-    return fallback;
-  }
-
-  private createBarValues(): number[] {
-    const baseValues: number[] = [
-      this.uiFocus,
-      this.uiFatigue,
-      this.uiRelax,
-      this.uiLoad,
-      this.uiQuality,
-      this.uiConfidence
+  private updateBarValues(): void {
+    this.barValues = [
+      Math.max(6, this.focusScore),
+      Math.max(6, this.relaxScore),
+      Math.max(6, this.loadScore),
+      Math.max(6, this.qualityScore),
+      Math.max(6, 100 - this.fatigueScore),
+      Math.max(6, Math.round(this.confidence * 100)),
+      Math.max(6, this.focusScore),
+      Math.max(6, this.relaxScore),
+      Math.max(6, this.loadScore),
+      Math.max(6, this.qualityScore),
+      Math.max(6, 100 - this.fatigueScore),
+      Math.max(6, Math.round(this.confidence * 100))
     ];
-    const modelSeed: number = this.brainData.model.length % 17;
-    const bars: number[] = [];
-    for (let index = 0; index < 12; index++) {
-      const source: number = baseValues[index % baseValues.length];
-      bars.push(this.clampPercent(source + modelSeed + (index % 3) * 4));
-    }
-    return bars;
   }
 
-  private updateHealthAlert(): void {
-    const lowHealth: boolean = this.healthScore() < this.healthThreshold;
-    const highFatigue: boolean = this.uiFatigue > this.fatigueThreshold;
-    const hasAlert: boolean = lowHealth || highFatigue;
-    if (!hasAlert) {
-      this.showHealthAlert = false;
-      this.alertMuted = false;
-      this.alertLowHealth = false;
-      this.alertHighFatigue = false;
-      this.lastAlertActive = false;
-      return;
-    }
-    if (this.alertMuted) {
-      return;
-    }
-    this.alertLowHealth = lowHealth;
-    this.alertHighFatigue = highFatigue;
-    if (!this.lastAlertActive) {
-      this.showHealthAlert = true;
-    }
-    this.lastAlertActive = true;
-  }
-
+  /**
+   * 组件即将销毁时调用
+   * 停止数据轮询和番茄钟，防止页面销毁后仍计时
+   */
   aboutToDisappear(): void {
-    console.info('[EEG_APP] dashboard aboutToDisappear');
-    this.dataService.stopReceiving();
+    this.stopAutoRefresh();
     this.pauseFocusTimer();
   }
 
@@ -382,30 +666,17 @@ struct Index {
     this.timerSeconds = this.focusDurationSec;
   }
 
-  /** 将专注时长限制在设备侧可安全处理的范围内 */
-  private clampDuration(total: number): number {
-    return Math.max(MIN_FOCUS_SEC, Math.min(total, MAX_FOCUS_SEC));
-  }
-
-  /** 调整弹窗内临时专注时长 */
-  private adjustDraftDuration(delta: number): void {
-    this.draftDurationSec = this.clampDuration(this.draftDurationSec + delta);
-  }
-
-  /** 设置弹窗内预设专注时长 */
-  private setDraftDuration(total: number): void {
-    this.draftDurationSec = this.clampDuration(total);
-  }
-
-  /** 格式化时长展示文本，避免依赖 API 11 的秒级 TimePicker */
-  private durationText(total: number): string {
-    const safeTotal: number = this.clampDuration(total);
+  /** 将秒数转为 TimePicker 用的 Date（API 10 仅支持小时和分钟） */
+  private dateFromSeconds(total: number): Date {
+    const safeTotal: number = Math.max(0, Math.min(total, MAX_FOCUS_SEC));
     const hours: number = Math.floor(safeTotal / 3600);
     const minutes: number = Math.floor((safeTotal % 3600) / 60);
-    if (hours > 0) {
-      return hours.toString() + this.t(' 小时 ', 'h ') + minutes.toString() + this.t(' 分钟', 'm');
-    }
-    return minutes.toString() + this.t(' 分钟', ' min');
+    return new Date(1970, 0, 1, hours, minutes, 0);
+  }
+
+  /** 从 TimePicker Date 读取总秒数 */
+  private secondsFromDate(date: Date): number {
+    return date.getHours() * 3600 + date.getMinutes() * 60;
   }
 
   /** 打开自定义专注时长弹窗 */
@@ -413,7 +684,7 @@ struct Index {
     if (this.timerRunning) {
       return;
     }
-    this.draftDurationSec = this.clampDuration(this.timerSeconds > 0 ? this.timerSeconds : this.focusDurationSec);
+    this.draftDurationDate = this.dateFromSeconds(this.timerSeconds);
     this.showDurationDialog = true;
   }
 
@@ -424,22 +695,23 @@ struct Index {
 
   /** 确认自定义时长并应用到番茄钟 */
   private confirmDurationDialog(): void {
-    const total: number = this.clampDuration(this.draftDurationSec);
+    const total: number = this.secondsFromDate(this.draftDurationDate);
     if (total <= 0) {
       return;
     }
     this.pauseFocusTimer();
-    this.focusDurationSec = total;
+    this.focusDurationSec = Math.min(total, MAX_FOCUS_SEC);
     this.timerSeconds = this.focusDurationSec;
     this.showDurationDialog = false;
   }
 
   /** 切换 Tab；离开专注页时自动暂停计时 */
   private switchTab(index: number): void {
-    if (this.currentTab === 1 && index !== 1 && this.timerRunning) {
+    const nextIndex: number = index > 1 ? 1 : Math.max(0, index);
+    if (this.currentTab === 1 && nextIndex !== 1 && this.timerRunning) {
       this.pauseFocusTimer();
     }
-    this.currentTab = index;
+    this.currentTab = nextIndex;
   }
 
   /**
@@ -470,7 +742,7 @@ struct Index {
     Stack({ alignContent: Alignment.Bottom }) {
       // ── 主内容区 ──
       Column() {
-        TopBar({ currentTab: this.currentTab, language: this.language })
+        this.TopBar()                          // 顶部栏（用户信息 + 操作按钮）
 
         Scroll() {                              // 可滚动内容区域
           Column({ space: 16 }) {
@@ -482,32 +754,26 @@ struct Index {
             }
           }
           .width('100%')
-          .padding({ left: 16, right: 16, top: 16, bottom: 104 })  // 底部留出导航栏高度
+          .padding({ left: 16, right: 16, top: 16, bottom: 126 })  // 底部留出悬浮导航栏高度
         }
         .layoutWeight(1)      // 填充剩余空间
         .scrollBar(BarState.Off) // 隐藏滚动条
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(AppColor.White)
+      .backgroundColor(this.appBackgroundColor())
 
       // ── 固定在底部的导航栏 ──
-      BottomNav({
-        currentTab: this.currentTab,
-        language: this.language,
-        onTabChange: (index: number) => {
-          this.switchTab(index);
-        }
-      })
+      this.BottomNav()
 
-      if (this.showHealthAlert) {
+      if (this.showSettingsPanel) {
         Stack() {
-          this.HealthAlertDialog()
+          this.SettingsDialog()
         }
         .width('100%')
         .height('100%')
         .position({ x: 0, y: 0 })
-        .zIndex(1100)
+        .zIndex(1000)
       }
 
       if (this.showDurationDialog) {
@@ -518,6 +784,16 @@ struct Index {
         .height('100%')
         .position({ x: 0, y: 0 })
         .zIndex(1000)
+      }
+
+      if (this.showSafetyAlert) {
+        Stack() {
+          this.SafetyAlertDialog()
+        }
+        .width('100%')
+        .height('100%')
+        .position({ x: 0, y: 0 })
+        .zIndex(3000)
       }
     }
     .width('100%')
@@ -533,6 +809,67 @@ struct Index {
    * 包含：AI 图标 → 问候语/App名称 → Tab名称 → 操作按钮
    * 背景带毛玻璃效果（半透明 + 阴影）
    */
+  @Builder
+  TopBar() {
+    Row() {
+      // 左侧：AI/HS 圆形图标
+      Text('AI')
+        .width(42)
+        .height(42)
+        .borderRadius(21)
+        .textAlign(TextAlign.Center)
+        .fontSize(14)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(AppColor.Primary)
+        .backgroundColor(AppColor.PrimarySoft)
+
+      // 中间：上行为问候语，下行为当前页面标题
+      Column() {
+        Text(this.currentTab === 0 ? this.t('早上好', 'Good morning') : this.t('健康同步', 'HealthSync'))
+          .fontSize(12)
+          .fontColor(AppColor.Muted)
+        Text(this.getTabName(this.currentTab))
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Primary)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 })
+
+      Blank()  // 弹性空白，将按钮推到右侧
+
+      if (SIMULATOR_DEMO_MODE) {
+        Text(this.displayStateText())
+          .fontSize(11)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.sourceColor())
+          .borderRadius(10)
+          .margin({ right: 6 })
+      }
+
+      // 右侧：设置入口
+      Button(this.t('设置', 'Settings'))
+        .width(92)
+        .height(40)
+        .fontSize(15)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .backgroundColor(AppColor.Primary)
+        .borderRadius(20)
+        .shadow({ radius: 10, color: '#220054CB', offsetY: 4 })
+        .onClick(() => {
+          this.showSettingsPanel = true;
+        })
+    }
+    .width('100%')
+    .height(64)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor('#ECFFFFFF')  // 半透明白色毛玻璃效果
+    .shadow({ radius: 14, color: '#142A5670', offsetY: 4 })
+  }
+
   // ==========================================================================
   // @Builder 方法 - 仪表盘页面（Dashboard）
   // ==========================================================================
@@ -543,333 +880,691 @@ struct Index {
    */
   @Builder
   DashboardPage() {
+    Column({ space: 14 }) {
+      this.DashboardHeader()
+      this.RefreshModePanel()
+      this.AdviceCard()
+      this.MetricGrid()
+    }
+    .width('100%')
+  }
+
+  @Builder
+  DashboardHeader() {
     Column({ space: 12 }) {
-      // ── 健康状态总览卡片 ──
       Row() {
         Column({ space: 4 }) {
           Text(this.t('每日健康状态', 'Daily Health Status'))
-            .fontSize(20)
+            .fontSize(24)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppColor.Text)
-          Text(this.liveStatusText())
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor((this.uiState === 'stressed' || this.uiState === 'stress') ? AppColor.Warning : AppColor.Muted)
+          Text(this.hasEegData
+            ? this.t('脑电数据已读取，按当前 ToApp 状态显示。', 'EEG data loaded from the current ToApp state.')
+            : this.t('等待脑电数据，未连接数据源。', 'Waiting for EEG data. No data source connected.'))
+            .fontSize(13)
+            .fontColor(AppColor.Muted)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
 
-        // 环形进度条：综合健康评分，随 ToAppJson 实时刷新
-        Stack() {
-          Progress({ value: this.healthScore(), total: 100, type: ProgressType.Ring })
-            .width(68)
-            .height(68)
-            .color(AppColor.Primary)
-          Text(this.healthScore().toString())
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(AppColor.Primary)
-        }
-      }
-      .padding(14)
-      .backgroundColor(AppColor.Card)
-      .borderRadius(16)
-      .border({ width: 1, color: AppColor.Border })
-
-      // ── 实时指标卡片（横向排列）──
-      Row({ space: 12 }) {
-        // 实时专注指数卡片
-        this.MetricCard('focus')
-        // 疲劳指数卡片
-        this.MetricCard('fatigue')
-      }
-
-      Row({ space: 12 }) {
-        this.MetricCard('relax')
-        this.MetricCard('load')
-      }
-
-      Row({ space: 12 }) {
-        this.MetricCard('quality')
-        this.MetricCard('confidence')
-      }
-
-      // ── 脑电频谱图 ──
-      this.SpectrumCard()
-
-      // ── AI 智能建议 ──
-      this.SuggestionCard()
-    }
-    .width('100%')
-  }
-
-  /**
-   * 指标卡片 - 单个健康指标展示
-   *
-   * @param title    - 指标名称
-   * @param value    - 指标数值
-   * @param unit     - 单位
-   * @param color    - 主题色（Good=绿色, Danger=红色）
-   * @param note     - 底部提示文字
-   * @param progress - 进度值 (0-100)
-   */
-  private metricTitle(metric: string): string {
-    if (metric === 'focus') {
-      return this.t('实时专注', 'Live Focus');
-    }
-    if (metric === 'fatigue') {
-      return this.t('疲劳指数', 'Fatigue Index');
-    }
-    if (metric === 'relax') {
-      return this.t('放松指数', 'Relax Index');
-    }
-    if (metric === 'load') {
-      return this.t('脑负荷', 'Brain Load');
-    }
-    if (metric === 'quality') {
-      return this.t('信号质量', 'Signal Quality');
-    }
-    return this.t('置信度', 'Confidence');
-  }
-
-  private metricValue(metric: string): number {
-    if (metric === 'focus') {
-      return this.uiFocus;
-    }
-    if (metric === 'fatigue') {
-      return this.uiFatigue;
-    }
-    if (metric === 'relax') {
-      return this.uiRelax;
-    }
-    if (metric === 'load') {
-      return this.uiLoad;
-    }
-    if (metric === 'quality') {
-      return this.uiQuality;
-    }
-    return this.uiConfidence;
-  }
-
-  private metricTrend(metric: string): number {
-    if (metric === 'focus') {
-      return this.uiFocusTrend;
-    }
-    if (metric === 'fatigue') {
-      return this.uiFatigueTrend;
-    }
-    if (metric === 'relax') {
-      return this.uiRelaxTrend;
-    }
-    if (metric === 'load') {
-      return this.uiLoadTrend;
-    }
-    return 0;
-  }
-
-  private metricColor(metric: string): string {
-    if (metric === 'fatigue') {
-      return AppColor.Danger;
-    }
-    if (metric === 'load') {
-      return AppColor.Warning;
-    }
-    if (metric === 'focus' || metric === 'quality') {
-      return AppColor.Good;
-    }
-    return AppColor.Primary;
-  }
-
-  private metricUnit(metric: string): string {
-    return metric === 'confidence' ? '%' : '/100';
-  }
-
-  /**
-   * 指标卡片 - 单个健康指标展示
-   * 只传固定指标类型，动态数值在 builder 内直接读取 @State，确保实时刷新。
-   */
-  @Builder
-  MetricCard(metric: string) {
-    Column() {
-      // 标题行：名称 + 趋势标记
-      Row() {
-        Text(this.metricTitle(metric))
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(AppColor.Text)
-        Blank()
-        Text(this.trendText(this.metricTrend(metric)))
-          .fontSize(12)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.metricTrend(metric) < 0 ? AppColor.Danger : this.metricColor(metric))
+        this.StatusBadge(this.dataSource, this.sourceColor())
       }
       .width('100%')
 
-      // 数值行：大号数字 + 小号单位
-      Row({ space: 4 }) {
-        Text(this.metricValue(metric).toString())
-          .fontSize(42)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.metricColor(metric) === AppColor.Danger ? AppColor.Danger : AppColor.Text)
-        Text(this.metricUnit(metric))
-          .fontSize(12)
-          .fontColor(AppColor.Muted)
+      Row({ space: 8 }) {
+        this.StatusBadge(this.source, AppColor.Violet)
+        this.StatusBadge(this.channelStatus, this.sourceColor())
       }
-      .alignItems(VerticalAlign.Bottom)
-      .margin({ top: 20 })
-
-      // 线性进度条（0-100%）
-      Progress({ value: this.clampPercent(this.metricValue(metric)), total: 100, type: ProgressType.Linear })
-        .height(8)
-        .color(this.metricColor(metric))
-        .margin({ top: 16 })
-
-      // 底部提示
-      Text(this.t('实时数据', 'Live data'))
-        .fontSize(11)
-        .fontColor(this.metricColor(metric))
-        .margin({ top: 8 })
+      .width('100%')
     }
     .alignItems(HorizontalAlign.Start)
-    .layoutWeight(1)
-    .height(176)
-    .padding(14)
-    .backgroundColor(AppColor.Card)
-    .borderRadius(16)
-    .border({ width: 1, color: this.metricColor(metric) === AppColor.Danger ? '#33FF4D4F' : AppColor.Border })
+    .width('100%')
+    .padding({ left: 4, right: 4, top: 4 })
   }
 
-  /**
-   * 脑电频谱卡片
-   * 展示 Alpha、Theta、Beta 三种脑电波的强度分布
-   */
   @Builder
-  SpectrumCard() {
-    Column({ space: 14 }) {
-      Text(this.t('脑电频谱', 'EEG Spectrum'))
-        .fontSize(20)
+  RefreshModePanel() {
+    Column({ space: 8 }) {
+      Text(this.t('刷新模式', 'Refresh Mode'))
+        .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppColor.Text)
-      // Alpha 波：放松状态，主题色
-      this.WaveRow('alpha')
-      // Theta 波：认知负荷/内省状态
-      this.WaveRow('theta')
-      // Beta 波：活跃思考/疲劳压力
-      this.WaveRow('beta')
+
+      this.RefreshModeSegment()
+
+      if (this.refreshMode === 'manual') {
+        Row() {
+          Button(this.t('测试', 'Test'))
+            .width(92)
+            .height(34)
+            .fontSize(14)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White)
+            .backgroundColor(AppColor.Primary)
+            .borderRadius(17)
+            .shadow({ radius: 6, color: '#160054CB', offsetY: 2 })
+            .onClick(() => {
+              this.refreshEegDataOnce();
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+      } else {
+        Text(this.t('每5秒轮询', 'Polling every 5s'))
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(AppColor.Muted)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+      }
     }
     .alignItems(HorizontalAlign.Start)
-    .padding(14)
-    .backgroundColor(AppColor.Card)
-    .borderRadius(16)
-    .border({ width: 1, color: AppColor.Border })
-  }
-
-  /**
-   * 单条脑电波段行
-   * @param label - 波段名称（Alpha/Theta/Beta）
-   * @param value - 强度百分比 (0-100)
-   * @param color - 显示颜色
-   */
-  private waveLabel(wave: string): string {
-    if (wave === 'alpha') {
-      return 'Alpha';
-    }
-    if (wave === 'theta') {
-      return 'Theta';
-    }
-    return 'Beta';
-  }
-
-  private waveValue(wave: string): number {
-    if (wave === 'alpha') {
-      return this.uiRelax;
-    }
-    if (wave === 'theta') {
-      return this.uiLoad;
-    }
-    return this.uiFatigue;
-  }
-
-  private waveColor(wave: string): string {
-    if (wave === 'alpha') {
-      return AppColor.Primary;
-    }
-    if (wave === 'theta') {
-      return AppColor.Good;
-    }
-    return AppColor.Warning;
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .backgroundColor('#E8FFFFFF')
+    .borderRadius(22)
+    .border({ width: 1, color: '#C8FFFFFF' })
+    .shadow({ radius: 10, color: '#102A5670', offsetY: 4 })
   }
 
   @Builder
-  WaveRow(wave: string) {
-    Row({ space: 12 }) {
-      Text(this.waveLabel(wave))
-        .width(58)
-        .fontSize(13)
+  RefreshModeSegment() {
+    Row() {
+      this.RefreshModeOption(this.t('手动', 'Manual'), 'manual')
+      this.RefreshModeOption(this.t('自动', 'Auto'), 'auto')
+    }
+    .width(184)
+    .height(38)
+    .padding(3)
+    .backgroundColor('#F2FFFFFF')
+    .borderRadius(19)
+    .border({ width: 1, color: '#C8FFFFFF' })
+  }
+
+  @Builder
+  RefreshModeOption(label: string, mode: string) {
+    Text(label)
+      .layoutWeight(1)
+      .height(32)
+      .fontSize(14)
+      .fontWeight(this.refreshMode === mode ? FontWeight.Bold : FontWeight.Medium)
+      .fontColor(this.refreshMode === mode ? Color.White : AppColor.Muted)
+      .textAlign(TextAlign.Center)
+      .borderRadius(16)
+      .backgroundColor(this.refreshMode === mode ? AppColor.Primary : '#00FFFFFF')
+      .onClick(() => {
+        if (mode === 'manual') {
+          this.switchToManualRefresh();
+        } else {
+          this.switchToAutoRefresh();
+        }
+      })
+  }
+
+  @Builder
+  AdviceCard() {
+    Column({ space: 16 }) {
+      Row({ space: 12 }) {
+        Text('AI')
+          .width(42)
+          .height(42)
+          .borderRadius(21)
+          .textAlign(TextAlign.Center)
+          .fontSize(14)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+          .backgroundColor(AppColor.Violet)
+        Column({ space: 2 }) {
+          Text(this.t('智能建议', 'Smart Suggestion'))
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(AppColor.Text)
+          Text(this.modelName)
+            .fontSize(12)
+            .fontColor(AppColor.Violet)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+      }
+      .width('100%')
+
+      Text(this.adviceText())
+        .fontSize(24)
+        .lineHeight(34)
         .fontWeight(FontWeight.Medium)
         .fontColor(AppColor.Text)
-      Progress({ value: this.waveValue(wave), total: 100, type: ProgressType.Linear })
-        .layoutWeight(1)
-        .height(6)
-        .color(this.waveColor(wave))
-      Text(this.waveValue(wave).toString() + '%')
-        .width(42)
-        .fontSize(12)
-        .fontColor(this.waveColor(wave))
+
+      Row({ space: 8 }) {
+        this.ChannelPill(this.t('数据源', 'Data'), this.dataSource + ' / ' + this.source, this.sourceColor())
+        this.ChannelPill(this.t('状态', 'State'), this.dataState, this.sourceColor())
+      }
+      .width('100%')
+
+      Row({ space: 8 }) {
+        this.ChannelPill('source', this.modelName, AppColor.Violet)
+        this.ChannelPill('CH1/CH2', (this.ch1Valid ? 'CH1 OK' : 'CH1 --') + ' / ' + (this.ch2Valid ? 'CH2 OK' : 'CH2 --'), this.sourceColor())
+      }
+      .width('100%')
+    }
+    .alignItems(HorizontalAlign.Start)
+    .width('100%')
+    .padding(22)
+    .backgroundColor('#FAFFFFFF')
+    .borderRadius(32)
+    .border({ width: 1, color: '#DFFFFFFF' })
+    .shadow({ radius: 24, color: '#202E3A50', offsetY: 10 })
+  }
+  @Builder
+  MetricGrid() {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        this.MetricCard(this.t('实时专注', 'Live Focus'), this.metricText(this.focusScore), '/100', AppColor.Good, this.connectionNote(), this.metricProgress(this.focusScore), this.focusTrend)
+        this.MetricCard(this.t('疲劳指数', 'Fatigue Index'), this.metricText(this.fatigueScore), '/100', AppColor.Danger, this.hasEegData ? this.dataState : this.connectionNote(), this.metricProgress(this.fatigueScore), this.fatigueTrend)
+      }
+      .width('100%')
+      Row({ space: 10 }) {
+        this.MetricCard(this.t('放松', 'Relax'), this.metricText(this.relaxScore), '/100', AppColor.Primary, this.dataSourceNote(), this.metricProgress(this.relaxScore), this.relaxTrend)
+        this.MetricCard(this.t('负荷', 'Load'), this.metricText(this.loadScore), '/100', AppColor.Warning, this.dataSourceNote(), this.metricProgress(this.loadScore), this.loadTrend)
+      }
+      .width('100%')
+      Row({ space: 10 }) {
+        this.MetricCard(this.t('信号质量', 'Signal Quality'), this.metricText(this.qualityScore), '/100', AppColor.Cyan, this.dataSourceNote(), this.metricProgress(this.qualityScore), 0)
+        this.MetricCard(this.t('置信度', 'Confidence'), this.confidencePercentText(), '%', AppColor.Violet, this.dataSourceNote(), this.confidenceProgress(), 0)
+      }
+      .width('100%')
     }
     .width('100%')
   }
 
-  /**
-   * AI 智能建议卡片
-   * 根据当前健康数据生成个性化建议
-   * 包含：AI 图标 → 标题 → 建议详情 → 快捷操作按钮
-   */
   @Builder
-  SuggestionCard() {
-    Column({ space: 12 }) {
-      // AI 标识 + 标题
-      Row({ space: 8 }) {
-        Text('AI')
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .textAlign(TextAlign.Center)
-          .fontSize(12)
+  MetricCard(title: string, value: string, unit: string, color: string, note: string, progress: number, trend: number) {
+    Column({ space: 9 }) {
+      Row() {
+        Text(title)
+          .fontSize(13)
           .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
-          .backgroundColor(AppColor.Primary)
-        Text(this.t('智能建议', 'Smart Suggestion'))
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Primary)
+          .fontColor(AppColor.Muted)
       }
+      .width('100%')
 
-      // 建议文本内容
-      Text(this.suggestionText())
-        .fontSize(14)
-        .lineHeight(22)
-        .fontColor(AppColor.Muted)
+      Row({ space: 4 }) {
+        Text(value)
+          .fontSize(34)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Text)
+          .maxLines(1)
+        Text(unit)
+          .fontSize(11)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(color)
+          .margin({ bottom: 5 })
+      }
+      .alignItems(VerticalAlign.Bottom)
 
-      // 快捷跳转按钮：点击后切换到专注页面
-      Button(this.t('打开专注计时器', 'Open Focus Timer'))
-        .height(48)
-        .width('100%')
-        .borderRadius(12)
-        .fontColor(Color.White)
-        .fontWeight(FontWeight.Bold)
-        .backgroundColor(AppColor.Primary)
-        .onClick(() => {
-          this.currentTab = 1;
-        })
+      Progress({ value: progress, total: 100, type: ProgressType.Linear })
+        .height(7)
+        .color(color)
+
+      Text(note)
+        .fontSize(11)
+        .fontColor(color)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .alignItems(HorizontalAlign.Start)
+    .layoutWeight(1)
+    .height(136)
     .padding(14)
-    .backgroundColor(AppColor.Card)
-    .borderRadius(16)
-    .border({ width: 1, color: AppColor.Border })
+    .backgroundColor(AppColor.Glass)
+    .borderRadius(24)
+    .border({ width: 1, color: '#C8FFFFFF' })
+    .shadow({ radius: 12, color: '#102A5670', offsetY: 5 })
   }
 
+  @Builder
+  AuxiliaryInfoCard() {
+    Column({ space: 12 }) {
+      Row() {
+        Text(this.hasEegData
+          ? this.t('当前模式：' + this.channelMode, 'Mode: ' + this.channelMode)
+          : this.t('等待脑电数据', 'Waiting for EEG data'))
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Text)
+        Blank()
+        Text('#' + this.lastUpdateSequence.toString())
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Muted)
+      }
+      .width('100%')
+
+      Row({ space: 8 }) {
+        this.ChannelPill(this.t('状态', 'State'), this.channelMode, this.sourceColor())
+        this.ChannelPill('CH1/CH2', (this.ch1Valid ? 'CH1 OK' : 'CH1 --') + ' / ' + (this.ch2Valid ? 'CH2 OK' : 'CH2 --'), this.sourceColor())
+      }
+      .width('100%')
+      Row({ space: 8 }) {
+        this.ChannelPill(this.t('数据源', 'Data'), this.dataSource + ' / ' + this.source, this.sourceColor())
+        this.ChannelPill('source', this.modelName, AppColor.Violet)
+      }
+      .width('100%')
+
+      Text(this.channelStatus)
+        .fontSize(12)
+        .fontColor(AppColor.Muted)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .alignItems(HorizontalAlign.Start)
+    .width('100%')
+    .padding(16)
+    .backgroundColor('#DFFFFFFF')
+    .borderRadius(24)
+    .border({ width: 1, color: '#BFFFFFFF' })
+  }
+
+  @Builder
+  ChannelPill(label: string, value: string, color: string) {
+    Row({ space: 8 }) {
+      Text(label)
+        .fontSize(12)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(color)
+      Text(value)
+        .fontSize(12)
+        .fontColor(AppColor.Text)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .layoutWeight(1)
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .backgroundColor('#F4FFFFFF')
+    .borderRadius(16)
+    .border({ width: 1, color: '#B8FFFFFF' })
+  }
+
+
+  @Builder
+  SettingsDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#730F1C2F')
+        .onClick(() => {
+          this.showSettingsPanel = false;
+        })
+
+      Column({ space: 12 }) {
+        Row() {
+          Column({ space: 3 }) {
+            Text(this.t('设置中心', 'Settings Center'))
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(AppColor.Text)
+            Text(this.t('设备、提醒与显示偏好', 'Device, alerts and display preferences'))
+              .fontSize(12)
+              .fontColor(AppColor.Muted)
+          }
+          .alignItems(HorizontalAlign.Start)
+          Blank()
+          Text(this.hasEegData ? this.t('设备在线', 'Device online') : this.t('等待数据', 'Waiting for data'))
+            .fontSize(11)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sourceColor())
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor(this.hasEegData ? '#E5F8EE' : '#FFF1E8')
+            .borderRadius(14)
+            .margin({ right: 10 })
+          Button(this.t('完成', 'Done'))
+            .height(36)
+            .fontSize(13)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White)
+            .backgroundColor(AppColor.Primary)
+            .borderRadius(18)
+            .onClick(() => {
+              this.showSettingsPanel = false;
+            })
+        }
+        .width('100%')
+
+        Scroll() {
+          Column({ space: 12 }) {
+            Row({ space: 12 }) {
+              Column({ space: 12 }) {
+                this.SettingsDeviceCard()
+                this.SettingsGeneralCard()
+              }
+              .layoutWeight(1)
+
+              Column() {
+                this.SettingsAlertCard()
+              }
+              .layoutWeight(1)
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Top)
+
+            this.SettingsAppearanceCard()
+          }
+          .width('100%')
+          .padding({ bottom: 4 })
+        }
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .width('92%')
+      .height('88%')
+      .padding(18)
+      .backgroundColor('#F8FFFFFF')
+      .borderRadius(30)
+      .border({ width: 1, color: '#D8FFFFFF' })
+      .shadow({ radius: 24, color: '#33000000', offsetY: 10 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  SettingsDeviceCard() {
+    Column({ space: 10 }) {
+      this.SettingsSectionHeader(this.t('设备', 'Device'), this.t('实时链路', 'Live link'), AppColor.Cyan)
+      this.SettingsInfoRow(this.t('数据源', 'Data source'), this.dataSource + ' / ' + this.source, this.sourceColor())
+      this.SettingsInfoRow(this.t('状态', 'Status'), this.channelStatus, this.sourceColor())
+      this.SettingsInfoRow(this.t('模型', 'Model'), this.modelName, AppColor.Violet)
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor('#F5FFFFFF')
+    .borderRadius(22)
+    .border({ width: 1, color: '#D8FFFFFF' })
+  }
+
+  @Builder
+  SettingsGeneralCard() {
+    Column({ space: 10 }) {
+      this.SettingsSectionHeader(this.t('通用', 'General'), this.t('本机偏好', 'Local preferences'), AppColor.Primary)
+      this.LanguageSelector()
+      this.SwitchRow(this.t('自动重连', 'Auto reconnect'), this.autoReconnect, (value: boolean) => {
+        this.autoReconnect = value;
+      })
+      this.SwitchRow(this.t('云同步', 'Cloud sync'), this.cloudSync, (value: boolean) => {
+        this.cloudSync = value;
+      })
+      this.SwitchRow(this.t('保持屏幕常亮', 'Keep screen on'), this.keepScreenOn, (value: boolean) => {
+        this.keepScreenOn = value;
+      })
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor('#F5FFFFFF')
+    .borderRadius(22)
+    .border({ width: 1, color: '#D8FFFFFF' })
+  }
+
+  @Builder
+  SettingsAlertCard() {
+    Column({ space: 10 }) {
+      Row() {
+        Column({ space: 3 }) {
+          Text(this.t('安全警告', 'Safety Alerts'))
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(AppColor.Text)
+          Text(this.t('超过阈值时全屏提醒，60 秒内不重复打断',
+            'Full-screen alert with a 60-second cooldown'))
+            .fontSize(11)
+            .fontColor(AppColor.Muted)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.warningEnabled })
+          .selectedColor(AppColor.Danger)
+          .onChange((value: boolean) => {
+            this.warningEnabled = value;
+            if (!value) {
+              this.showSafetyAlert = false;
+            }
+          })
+      }
+      .width('100%')
+
+      this.SliderFocusThreshold()
+      this.SliderFatigueThreshold()
+      this.SliderQualityThreshold()
+      this.SliderConfidenceThreshold()
+
+      Button(this.t('预览安全警告', 'Preview Safety Alert'))
+        .width('100%')
+        .height(40)
+        .fontSize(13)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .backgroundColor(AppColor.Danger)
+        .borderRadius(20)
+        .enabled(this.warningEnabled)
+        .opacity(this.warningEnabled ? 1 : 0.45)
+        .onClick(() => {
+          this.previewSafetyAlert();
+        })
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor('#FFF8F7')
+    .borderRadius(22)
+    .border({ width: 1, color: '#FFD4D0' })
+  }
+
+  @Builder
+  SettingsAppearanceCard() {
+    Column({ space: 10 }) {
+      this.SettingsSectionHeader(this.t('界面背景', 'Interface Background'),
+        this.t('选择后立即应用', 'Applied immediately'), AppColor.Good)
+      Row({ space: 10 }) {
+        this.BackgroundOption(this.t('清爽', 'Fresh'), '#EEF7F7', 0)
+        this.BackgroundOption(this.t('蓝色', 'Blue'), '#E8F2FF', 1)
+        this.BackgroundOption(this.t('暖色', 'Warm'), '#FFF4E8', 2)
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor('#F5FFFFFF')
+    .borderRadius(22)
+    .border({ width: 1, color: '#D8FFFFFF' })
+  }
+
+  @Builder
+  SettingsSectionHeader(title: string, subtitle: string, color: string) {
+    Row() {
+      Column({ space: 2 }) {
+        Text(title)
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Text)
+        Text(subtitle)
+          .fontSize(11)
+          .fontColor(AppColor.Muted)
+      }
+      .alignItems(HorizontalAlign.Start)
+      Blank()
+      Text(this.t('已保存', 'Saved'))
+        .fontSize(10)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(color)
+        .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+        .backgroundColor('#EFFFFFFF')
+        .borderRadius(12)
+    }
+    .width('100%')
+  }
+
+  @Builder
+  SettingsInfoRow(label: string, value: string, color: string) {
+    Row({ space: 8 }) {
+      Text(label)
+        .width(72)
+        .fontSize(11)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(color)
+      Text(value)
+        .layoutWeight(1)
+        .fontSize(11)
+        .fontColor(AppColor.Text)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+    .backgroundColor('#F2FFFFFF')
+    .borderRadius(14)
+    .border({ width: 1, color: '#B8FFFFFF' })
+  }
+
+  @Builder
+  SliderQualityThreshold() {
+    Column({ space: 5 }) {
+      Row() {
+        Text(this.t('信号质量下限', 'Signal quality minimum'))
+          .fontSize(13)
+          .fontColor(AppColor.Text)
+        Blank()
+        Text(Math.round(this.qualityThreshold).toString() + '%')
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Warning)
+      }
+      Slider({ value: this.qualityThreshold, min: 0, max: 100, step: 1, style: SliderStyle.InSet })
+        .width('100%')
+        .blockColor(AppColor.Warning)
+        .trackColor('#33FF8A4C')
+        .selectedColor(AppColor.Warning)
+        .onChange((value: number) => {
+          this.qualityThreshold = value;
+        })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  SliderConfidenceThreshold() {
+    Column({ space: 5 }) {
+      Row() {
+        Text(this.t('可信度下限', 'Confidence minimum'))
+          .fontSize(13)
+          .fontColor(AppColor.Text)
+        Blank()
+        Text(Math.round(this.confidenceThreshold).toString() + '%')
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Violet)
+      }
+      Slider({ value: this.confidenceThreshold, min: 0, max: 100, step: 1, style: SliderStyle.InSet })
+        .width('100%')
+        .blockColor(AppColor.Violet)
+        .trackColor('#336B5CFF')
+        .selectedColor(AppColor.Violet)
+        .onChange((value: number) => {
+          this.confidenceThreshold = value;
+        })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  SafetyAlertDialog() {
+    Column({ space: 14 }) {
+      Text(this.alertTitle)
+        .fontSize(12)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#8E1B1B')
+        .padding({ left: 14, right: 14, top: 7, bottom: 7 })
+        .backgroundColor('#FDE8E7')
+        .borderRadius(16)
+
+      Text(this.alertMessage)
+        .fontSize(30)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .textAlign(TextAlign.Center)
+
+      Text(this.alertDetail)
+        .fontSize(14)
+        .fontColor('#FFF0EF')
+        .textAlign(TextAlign.Center)
+        .maxLines(2)
+
+      Row({ space: 12 }) {
+        this.AlertMetric(this.t('疲劳度', 'Fatigue'), this.alertFatigue)
+        this.AlertMetric(this.t('专注度', 'Focus'), this.alertFocus)
+        this.AlertMetric(this.t('信号质量', 'Signal'), this.alertQuality)
+      }
+      .width('72%')
+
+      Button(this.t('我知道了', 'Acknowledge'))
+        .width('52%')
+        .height(48)
+        .fontSize(15)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#8E1B1B')
+        .backgroundColor(Color.White)
+        .borderRadius(24)
+        .shadow({ radius: 18, color: '#42000000', offsetY: 5 })
+        .onClick(() => {
+          this.dismissSafetyAlert();
+        })
+    }
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .width('100%')
+    .height('100%')
+    .padding({ left: 28, right: 28, top: 20, bottom: 20 })
+    .linearGradient({
+      angle: 135,
+      colors: [['#E5484D', 0.0], ['#991B1B', 1.0]]
+    })
+  }
+
+  @Builder
+  AlertMetric(label: string, value: number) {
+    Column({ space: 3 }) {
+      Text(value.toString())
+        .fontSize(24)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+      Text(label)
+        .fontSize(11)
+        .fontColor('#FFD7D5')
+    }
+    .layoutWeight(1)
+    .height(68)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#28FFFFFF')
+    .borderRadius(18)
+    .border({ width: 1, color: '#40FFFFFF' })
+  }
+
+  @Builder
+  StatusBadge(label: string, color: string) {
+    Text(label)
+      .fontSize(11)
+      .fontWeight(FontWeight.Bold)
+      .fontColor(color)
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+      .backgroundColor('#EEFFFFFF')
+      .borderRadius(14)
+      .border({ width: 1, color: '#C8FFFFFF' })
+  }
   // ==========================================================================
   // @Builder 方法 - 专注页面（Focus）
   // ==========================================================================
@@ -952,13 +1647,12 @@ struct Index {
 
   /**
    * 自定义专注时长弹窗
-   * 时/分/秒滚轮 + 取消 / 确定（蓝色高亮）
+   * 时/分滚轮 + 取消 / 确定（兼容 OpenHarmony API 10）
    */
   @Builder
   FocusDurationDialog() {
     Stack({ alignContent: Alignment.Center }) {
-      Column() {
-      }
+      Column()
         .width('100%')
         .height('100%')
         .backgroundColor('#80000000')
@@ -974,101 +1668,15 @@ struct Index {
           .width('100%')
           .textAlign(TextAlign.Center)
 
-        Text(this.durationText(this.draftDurationSec))
-          .fontSize(34)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColor.Primary)
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .padding({ top: 10, bottom: 10 })
-          .borderRadius(16)
-          .backgroundColor(AppColor.PrimarySoft)
-
-        Row({ space: 8 }) {
-          Button('-5')
-            .layoutWeight(1)
-            .height(44)
-            .borderRadius(12)
-            .fontColor(AppColor.Primary)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.adjustDraftDuration(-FOCUS_STEP_SEC);
-            })
-          Button('-1')
-            .layoutWeight(1)
-            .height(44)
-            .borderRadius(12)
-            .fontColor(AppColor.Primary)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.adjustDraftDuration(-60);
-            })
-          Button('+1')
-            .layoutWeight(1)
-            .height(44)
-            .borderRadius(12)
-            .fontColor(AppColor.Primary)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.adjustDraftDuration(60);
-            })
-          Button('+5')
-            .layoutWeight(1)
-            .height(44)
-            .borderRadius(12)
-            .fontColor(AppColor.Primary)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.adjustDraftDuration(FOCUS_STEP_SEC);
-            })
-        }
-        .width('100%')
-
-        Row({ space: 8 }) {
-          Button('15')
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontColor(AppColor.Muted)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.setDraftDuration(15 * 60);
-            })
-          Button('25')
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontColor(AppColor.Muted)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.setDraftDuration(25 * 60);
-            })
-          Button('45')
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontColor(AppColor.Muted)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.setDraftDuration(45 * 60);
-            })
-          Button('60')
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontColor(AppColor.Muted)
-            .backgroundColor(AppColor.Surface)
-            .onClick(() => {
-              this.setDraftDuration(60 * 60);
-            })
-        }
-        .width('100%')
-
-        Text(this.t('单位：分钟。计时期间不可修改。', 'Unit: minutes. Duration is locked while focusing.'))
-          .fontSize(12)
-          .fontColor(AppColor.Muted)
-          .width('100%')
-          .textAlign(TextAlign.Center)
+        TimePicker({
+          selected: this.draftDurationDate
+        })
+          .useMilitaryTime(true)
+          .onChange((value: TimePickerResult) => {
+            if (value.hour >= 0) {
+              this.draftDurationDate = new Date(1970, 0, 1, value.hour, value.minute, 0);
+            }
+          })
 
         Row({ space: 12 }) {
           Button(this.t('取消', 'Cancel'))
@@ -1096,60 +1704,8 @@ struct Index {
       }
       .padding(20)
       .width('88%')
-      .backgroundColor(AppColor.White)
+      .backgroundColor('#EEF7F7')
       .borderRadius(20)
-    }
-    .width('100%')
-    .height('100%')
-  }
-
-  /**
-   * 健康/疲劳警告弹窗
-   * 触发条件：健康指数低于阈值或疲劳指数高于阈值
-   */
-  @Builder
-  HealthAlertDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#66FF4D4F')
-
-      Column({ space: 14 }) {
-        Text(this.t('健康警报', 'Health Alert'))
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
-
-        if (this.alertLowHealth) {
-          Text(this.t('检测到健康度过低。', 'Low health detected.'))
-            .fontSize(14)
-            .fontColor(Color.White)
-        }
-        if (this.alertHighFatigue) {
-          Text(this.t('检测到过度疲劳。', 'Excessive fatigue detected.'))
-            .fontSize(14)
-            .fontColor(Color.White)
-        }
-
-        Button(this.t('已了解，休息一下', 'Got it, take a break'))
-          .height(44)
-          .width('100%')
-          .borderRadius(12)
-          .fontColor(AppColor.Danger)
-          .fontWeight(FontWeight.Bold)
-          .backgroundColor(Color.White)
-          .onClick(() => {
-            this.showHealthAlert = false;
-            this.alertMuted = true;
-          })
-      }
-      .padding(18)
-      .width('82%')
-      .backgroundColor('#CCFF4D4F')
-      .borderRadius(18)
-      .border({ width: 1, color: '#55FFFFFF' })
-      .shadow({ radius: 18, color: '#66000000', offsetX: 0, offsetY: 8 })
     }
     .width('100%')
     .height('100%')
@@ -1169,7 +1725,7 @@ struct Index {
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Text)
         Blank()
-        Text(this.uiFocus.toString() + '%')
+        Text(this.hasEegData ? this.focusScore.toString() + '%' : '--')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Primary)
@@ -1177,21 +1733,21 @@ struct Index {
       .width('100%')
 
       // 进度条
-      Progress({ value: this.uiFocus, total: 100, type: ProgressType.Linear })
+      Progress({ value: this.metricProgress(this.focusScore), total: 100, type: ProgressType.Linear })
         .height(8)
         .color(AppColor.Primary)
 
-      Text(this.t('实时脑电', 'Realtime EEG'))
+      Text(this.hasEegData ? this.dataSourceNote() : this.t('等待脑电数据', 'Waiting for EEG data'))
         .fontSize(12)
         .fontColor(AppColor.Muted)
 
-      // 模拟脑电波柱状图（12 根动态高度柱）
+      // 无数据时保持低位占位；有数据时由 ToApp/currentData 指标派生高度
       Row({ space: 3 }) {
         ForEach(this.barValues, (height: number) => {
           Column() {
           }
             .width(5)
-            .height(Math.max(8, height))
+            .height(height)
             .borderRadius(3)
             .opacity(0.72)
             .backgroundColor(AppColor.Primary)
@@ -1220,17 +1776,14 @@ struct Index {
         .fontSize(18)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppColor.Text)
-      Text(this.t(
-        '每次专注训练后休息5分钟，有助于认知恢复。',
-        'After one focus session, rest for 5 minutes to help cognitive recovery.'
-      ))
+      Text(this.advice)
         .fontSize(14)
         .lineHeight(22)
         .fontColor(AppColor.Muted)
-      // 标签行：有效性 + 科学依据标记
+      // 标签行：显示数据来源与状态
       Row({ space: 8 }) {
-        this.Tag(this.t('有效', 'Effective'))
-        this.Tag(this.t('有依据', 'Evidence'))
+        this.Tag(this.dataSource)
+        this.Tag(this.dataState)
       }
     }
     .alignItems(HorizontalAlign.Start)
@@ -1257,13 +1810,143 @@ struct Index {
   }
 
   // ==========================================================================
-  // @Builder 方法 - 个人页面（Profile，当前未使用）
+  // @Builder 方法 - 运动页面（Sports）
   // ==========================================================================
 
   /**
-   * 个人页面 - 用户中心 + 健康摘要
-   * 包含：用户信息 → 今日/疲劳统计
-   * 说明：当前模块未在应用导航中使用，仅保留作为参考。
+   * 运动页面 - 实时运动数据追踪
+   * 包含：横向滚动指标卡 → 专注状态环 → 路线预览 → 饮水提示
+   */
+  @Builder
+  SportsPage() {
+    Column({ space: 18 }) {
+      // ── 横向滚动的运动指标 ──
+      Scroll() {
+        Row({ space: 12 }) {
+          this.SportMetric(this.t('心率', 'Heart Rate'), '142', this.t('次/分', 'bpm'), AppColor.Danger)
+          this.SportMetric(this.t('步频', 'Cadence'), '184', this.t('步/分', 'spm'), AppColor.Primary)
+          this.SportMetric(this.t('卡路里', 'Calories'), '342', this.t('千卡', 'kcal'), AppColor.Warning)
+        }
+        .padding({ right: 16 })
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+
+      // ── 专注状态环形图 ──
+      Column({ space: 8 }) {
+        Text(this.t('专注状态', 'Focus State'))
+          .fontSize(12)
+          .fontColor(AppColor.Muted)
+        Stack() {
+          Progress({ value: this.metricProgress(this.focusScore), total: 100, type: ProgressType.Ring })
+            .width(250)
+            .height(250)
+            .color(AppColor.Primary)
+          Column({ space: 4 }) {
+            Text(this.metricText(this.focusScore))
+              .fontSize(52)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(AppColor.Text)
+            Text(this.hasEegData ? this.dataSourceNote() : this.t('等待脑电数据', 'Waiting for EEG data'))
+              .fontSize(12)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sourceColor())
+          }
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Center)
+
+      // ── 路线预览区域 ──
+      Column({ space: 8 }) {
+        Text(this.t('路线预览', 'Route Preview'))
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(AppColor.Muted)
+        Stack() {
+          // 模拟地图水印
+          Text(this.t('地图', 'MAP'))
+            .fontSize(28)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(AppColor.Primary)
+            .opacity(0.28)
+          // 路线追踪状态标签
+          Text(this.t('追踪运动路线', 'Tracking workout route'))
+            .fontSize(13)
+            .fontColor(AppColor.Primary)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(16)
+            .backgroundColor('#1A0054CB')
+            .margin({ top: 96 })
+        }
+        .height(196)
+        .width('100%')
+        .backgroundColor(AppColor.Surface)
+        .borderRadius(16)
+        .border({ width: 1, color: AppColor.Border })
+      }
+      .alignItems(HorizontalAlign.Start)
+
+      // ── 饮水提醒 ──
+      Row({ space: 12 }) {
+        Text('H2O')
+          .width(42)
+          .height(38)
+          .borderRadius(10)
+          .textAlign(TextAlign.Center)
+          .fontColor(AppColor.Primary)
+          .fontWeight(FontWeight.Bold)
+          .backgroundColor(AppColor.PrimarySoft)
+        Text(this.t('保持节奏，记得喝水。', 'Keep your pace and drink water.'))
+          .fontSize(14)
+          .fontColor(AppColor.Muted)
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor(AppColor.Surface)
+      .borderRadius(16)
+    }
+  }
+
+  /**
+   * 运动指标卡片（支持横向滚动）
+   * @param title - 指标名称
+   * @param value - 当前数值
+   * @param unit  - 单位
+   * @param color - 主题色
+   */
+  @Builder
+  SportMetric(title: string, value: string, unit: string, color: string) {
+    Column({ space: 8 }) {
+      Text(title)
+        .fontSize(12)
+        .fontColor(AppColor.Muted)
+      Row({ space: 4 }) {
+        Text(value)
+          .fontSize(28)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Text)
+        Text(unit)
+          .fontSize(11)
+          .fontColor(color)
+      }
+      .alignItems(VerticalAlign.Bottom)
+    }
+    .alignItems(HorizontalAlign.Start)
+    .width(152)
+    .padding(14)
+    .borderRadius(16)
+    .backgroundColor(AppColor.Card)
+    .border({ width: 1, color: AppColor.Border })
+  }
+
+  // ==========================================================================
+  // @Builder 方法 - 个人页面（Profile）
+  // ==========================================================================
+
+  /**
+   * 个人页面 - 用户中心 + 系统设置
+   * 包含：用户信息 → 今日/疲劳统计 → 菜单列表 → 设置面板 → 背景选择器
    */
   @Builder
   ProfilePage() {
@@ -1299,10 +1982,37 @@ struct Index {
 
       // ── 统计汇总卡片（今日专注 + 平均疲劳）──
       Row({ space: 12 }) {
-        SummaryCard({ title: this.t('今日专注', 'Today Focus'), value: this.summaryValue(0, '0'), color: AppColor.Primary })
-        SummaryCard({ title: this.t('平均疲劳', 'Avg Fatigue'), value: this.summaryValue(1, this.uiFatigue.toString() + ' /100'), color: AppColor.Warning })
+        this.SummaryCard(this.t('今日专注', 'Today Focus'), '2h 30m', AppColor.Primary)
+        this.SummaryCard(this.t('平均疲劳', 'Avg Fatigue'), '45 /100', AppColor.Warning)
       }
 
+      // ── 功能菜单列表 ──
+      Column() {
+        this.MenuRow(
+          this.t('设备管理', 'Device Management'),
+          this.t('Orange Pi 已连接', 'Orange Pi connected'),
+          AppColor.Primary
+        )
+        this.MenuRow(
+          this.t('提醒阈值', 'Alert Thresholds'),
+          this.t('自定义疲劳提醒', 'Customize fatigue warning'),
+          AppColor.Danger
+        )
+        this.MenuRow(
+          this.t('背景样式', 'Background Style'),
+          this.t('纯色、渐变和预览', 'Solid, gradient and preview'),
+          AppColor.Good
+        )
+      }
+      .backgroundColor('#EEF7F7')
+      .borderRadius(16)
+      .border({ width: 1, color: AppColor.Border })
+
+      // ── 设置面板 ──
+      this.SettingsPanel()
+
+      // ── 背景样式选择器 ──
+      this.BackgroundPicker()
     }
     .width('100%')
   }
@@ -1313,23 +2023,454 @@ struct Index {
    * @param value - 核心数值
    * @param color - 数值颜色
    */
+  @Builder
+  SummaryCard(title: string, value: string, color: string) {
+    Column() {
+      Text(title)
+        .fontSize(12)
+        .fontColor(AppColor.Muted)
+      Blank()
+      Text(value)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(color)
+    }
+    .alignItems(HorizontalAlign.Start)
+    .layoutWeight(1)
+    .height(122)
+    .padding(14)
+    .backgroundColor(AppColor.Card)
+    .borderRadius(16)
+    .border({ width: 1, color: AppColor.Border })
+  }
+
   /**
    * 菜单行（含标题 + 副标题 + 右箭头）
    * @param title    - 主标题
    * @param subtitle - 副标题/当前状态
    * @param color    - 右箭头颜色
    */
+  @Builder
+  MenuRow(title: string, subtitle: string, color: string) {
+    Row() {
+      Column({ space: 4 }) {
+        Text(title)
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(AppColor.Text)
+        Text(subtitle)
+          .fontSize(12)
+          .fontColor(AppColor.Muted)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      Text('>')
+        .fontSize(22)
+        .fontColor(color)
+    }
+    .padding(16)
+    .width('100%')
+  }
+
+  // ==========================================================================
+  // @Builder 方法 - 设置面板
+  // ==========================================================================
+
+  /**
+   * 设置面板
+   * 包含：IP/端口配置 → 语言切换 → 自动重连开关 → 阈值滑块 → 云同步/常亮开关
+   */
+  @Builder
+  SettingsPanel() {
+    Column({ space: 12 }) {
+      Text(this.t('设置', 'Settings'))
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(AppColor.Text)
+        .width('100%')
+
+      // ── 服务器连接配置（IP + 端口）──
+      Row({ space: 10 }) {
+        this.InputLike(this.t('IP地址', 'IP Address'), '127.0.0.1')
+        this.InputLike(this.t('端口', 'Port'), '18080')
+      }
+
+      // ── 语言选择器 ──
+      this.LanguageSelector()
+
+      // ── 自动重连开关 ──
+      this.ToggleAutoReconnect()
+
+      // ── 专注/疲劳阈值滑块 ──
+      this.SliderFocusThreshold()
+      this.SliderFatigueThreshold()
+
+      // ── 云同步 + 屏幕常亮开关 ──
+      this.ToggleCloudSync()
+      this.ToggleKeepScreenOn()
+    }
+    .alignItems(HorizontalAlign.Start)
+    .padding(16)
+    .backgroundColor(AppColor.Card)
+    .borderRadius(16)
+    .border({ width: 1, color: AppColor.Border })
+  }
+
+  /**
+   * 语言选择器 - 中文/英文 二选一按钮组
+   * 选中状态高亮为主题色，未选中为灰色
+   */
+  @Builder
+  LanguageSelector() {
+    Row() {
+      Text(this.t('语言', 'Language'))
+        .fontSize(15)
+        .fontColor(AppColor.Text)
+      Blank()
+      Row({ space: 6 }) {
+        // 中文按钮
+        Button(this.t('中文', 'CN'))
+          .height(32)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.language === 0 ? Color.White : AppColor.Text)
+          .backgroundColor(this.language === 0 ? AppColor.Primary : AppColor.Surface)
+          .borderRadius(16)
+          .padding({ left: 14, right: 14 })
+          .onClick(() => {
+            this.language = 0;
+            if (SIMULATOR_DEMO_MODE) {
+              DemoDataService.getInstance().setLanguage(0);
+            }
+          })
+        // 英文按钮
+        Button(this.t('EN', 'EN'))
+          .height(32)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.language === 1 ? Color.White : AppColor.Text)
+          .backgroundColor(this.language === 1 ? AppColor.Primary : AppColor.Surface)
+          .borderRadius(16)
+          .padding({ left: 14, right: 14 })
+          .onClick(() => {
+            this.language = 1;
+            if (SIMULATOR_DEMO_MODE) {
+              DemoDataService.getInstance().setLanguage(1);
+            }
+          })
+      }
+    }
+    .width('100%')
+    .padding({ top: 4, bottom: 4 })
+  }
+
+  /**
+   * 模拟输入框（只读展示，不可编辑）
+   * @param label - 标签文字
+   * @param value - 显示的值
+   */
+  @Builder
+  InputLike(label: string, value: string) {
+    Column({ space: 6 }) {
+      Text(label)
+        .fontSize(12)
+        .fontColor(AppColor.Muted)
+      Text(value)
+        .fontSize(14)
+        .fontColor(AppColor.Text)
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .width('100%')
+        .borderRadius(10)
+        .backgroundColor('#EEF7F7')
+        .border({ width: 1, color: AppColor.Border })
+    }
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // ── 开关行组件 ──
+
+  /** 自动重连开关 */
+  @Builder
+  ToggleAutoReconnect() {
+    this.SwitchRow(this.t('自动重连', 'Auto reconnect'), this.autoReconnect, (value: boolean) => {
+      this.autoReconnect = value;
+    })
+  }
+
+  /** 云同步开关 */
+  @Builder
+  ToggleCloudSync() {
+    this.SwitchRow(this.t('云同步', 'Cloud sync'), this.cloudSync, (value: boolean) => {
+      this.cloudSync = value;
+    })
+  }
+
+  /** 屏幕常亮开关 */
+  @Builder
+  ToggleKeepScreenOn() {
+    this.SwitchRow(this.t('保持屏幕常亮', 'Keep screen on'), this.keepScreenOn, (value: boolean) => {
+      this.keepScreenOn = value;
+    })
+  }
+
+  /**
+   * 通用开关行（标签 + Switch 组件）
+   * @param label   - 开关标签
+   * @param checked - 当前开关状态
+   * @param onChange - 开关状态变化回调
+   */
+  @Builder
+  SwitchRow(label: string, checked: boolean, onChange: (value: boolean) => void) {
+    Row() {
+      Text(label)
+        .fontSize(15)
+        .fontColor(AppColor.Text)
+      Blank()
+      Toggle({ type: ToggleType.Switch, isOn: checked })
+        .selectedColor(AppColor.Primary)
+        .onChange((value: boolean) => {
+          onChange(value);
+        })
+    }
+    .width('100%')
+    .padding({ top: 4, bottom: 4 })
+  }
+
+  /**
+   * 专注阈值滑块
+   * 范围 0-100%，使用内嵌样式（InSet）滑块
+   */
+  @Builder
+  SliderFocusThreshold() {
+    Column({ space: 8 }) {
+      Row() {
+        Text(this.t('专注阈值', 'Focus threshold'))
+          .fontSize(15)
+          .fontColor(AppColor.Text)
+        Blank()
+        Text(Math.round(this.focusThreshold).toString() + '%')
+          .fontSize(13)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Primary)
+      }
+      .width('100%')
+      Slider({
+        value: this.focusThreshold,
+        min: 0,
+        max: 100,
+        step: 1,
+        style: SliderStyle.InSet
+      })
+        .width('100%')
+        .blockColor(AppColor.Primary)
+        .trackColor(AppColor.PrimarySoft)
+        .selectedColor(AppColor.Primary)
+        .onChange((value: number) => {
+          this.focusThreshold = value;
+        })
+    }
+    .width('100%')
+  }
+
+  /**
+   * 疲劳阈值滑块
+   * 范围 0-100，超过阈值触发疲劳警告
+   */
+  @Builder
+  SliderFatigueThreshold() {
+    Column({ space: 8 }) {
+      Row() {
+        Text(this.t('疲劳阈值', 'Fatigue threshold'))
+          .fontSize(15)
+          .fontColor(AppColor.Text)
+        Blank()
+        Text(Math.round(this.fatigueThreshold).toString() + '/100')
+          .fontSize(13)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Danger)
+      }
+      .width('100%')
+      Slider({
+        value: this.fatigueThreshold,
+        min: 0,
+        max: 100,
+        step: 1,
+        style: SliderStyle.InSet
+      })
+        .width('100%')
+        .blockColor(AppColor.Danger)
+        .trackColor('#33FF4D4F')
+        .selectedColor(AppColor.Danger)
+        .onChange((value: number) => {
+          this.fatigueThreshold = value;
+        })
+    }
+    .width('100%')
+  }
+
+  // ==========================================================================
+  // @Builder 方法 - 背景样式选择器
+  // ==========================================================================
+
+  /**
+   * 背景样式选择器
+   * 提供三种预设背景主题：白色、蓝色、暖色
+   */
+  @Builder
+  BackgroundPicker() {
+    Column({ space: 14 }) {
+      // 预览区：显示当前选中样式的效果
+      Column({ space: 8 }) {
+        Text(this.t('健康同步', 'Health Sync'))
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppColor.Text)
+        Progress({ value: 74, total: 100, type: ProgressType.Linear })
+          .height(8)
+          .color(AppColor.Primary)
+      }
+      .width('78%')
+      .padding(18)
+      .borderRadius(16)
+      .backgroundColor('#CCFFFFFF')
+      .border({ width: 1, color: AppColor.Border })
+
+      // 颜色选项行
+      Row({ space: 10 }) {
+        this.BackgroundOption(this.t('白色', 'White'), '#FFFFFF', 0)
+        this.BackgroundOption(this.t('蓝色', 'Blue'), '#E0F2FF', 1)
+        this.BackgroundOption(this.t('暖色', 'Warm'), '#FFF3E0', 2)
+      }
+
+      // 应用按钮
+      Button(this.t('应用背景', 'Apply Background'))
+        .height(48)
+        .width('100%')
+        .borderRadius(12)
+        .fontColor(Color.White)
+        .fontWeight(FontWeight.Bold)
+        .backgroundColor(AppColor.Primary)
+    }
+    .alignItems(HorizontalAlign.Start)
+    .padding(16)
+    .backgroundColor(AppColor.Card)
+    .borderRadius(16)
+    .border({ width: 1, color: AppColor.Border })
+  }
+
+  /**
+   * 背景颜色选项
+   * 选中时显示主题色边框 + 文字加粗
+   * @param label - 颜色名称
+   * @param color - 背景色值
+   * @param index - 选项索引
+   */
+  @Builder
+  BackgroundOption(label: string, color: string, index: number) {
+    Column() {
+      Text(label)
+        .fontSize(12)
+        .fontColor(index === this.bgStyle ? AppColor.Primary : AppColor.Muted)
+        .fontWeight(index === this.bgStyle ? FontWeight.Bold : FontWeight.Regular)
+    }
+    .layoutWeight(1)
+    .height(72)
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor(color)
+    .borderRadius(14)
+    .border({ width: index === this.bgStyle ? 2 : 1, color: index === this.bgStyle ? AppColor.Primary : AppColor.Border })
+    .onClick(() => {
+      this.bgStyle = index;
+    })
+  }
+
   // ==========================================================================
   // @Builder 方法 - 底部导航栏
   // ==========================================================================
 
   /**
-  * 底部导航栏（2 个 Tab）
-   * 带毛玻璃效果背景，选中态为主题色高亮
-  * Tab 图标：D=仪表盘, F=专注
+   * 底部导航栏（2 个 Tab）
+   * 毛玻璃背景胶囊，选中态为纯色填充。
    */
+  @Builder
+  BottomNav() {
+    Row() {
+      ForEach(this.getTabItems(), (item: TabItem, index: number) => {
+        this.NavItem(item, index)
+      })
+    }
+    .width('82%')
+    .height(52)
+    .padding(4)
+    .backgroundColor('#BFFFFFFF')
+    .backdropBlur(20)
+    .borderRadius(26)
+    .border({ width: 1, color: '#E6FFFFFF' })
+    .shadow({ radius: 18, color: '#262A5670', offsetY: 6 })
+    .margin({ bottom: 20 })
+  }
+
+  @Builder
+  NavItem(item: TabItem, index: number) {
+    Row({ space: 5 }) {
+      Text(item.icon)
+        .fontSize(13)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(index === this.currentTab ? Color.White : '#88556477')
+      Text(item.name)
+        .fontSize(11)
+        .fontWeight(index === this.currentTab ? FontWeight.Bold : FontWeight.Medium)
+        .fontColor(index === this.currentTab ? Color.White : '#99556477')
+        .maxLines(1)
+        .opacity(index === this.currentTab ? 1 : 0)
+        .animation({ duration: 180, curve: Curve.EaseOut })
+    }
+    .height(44)
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+    .borderRadius(22)
+    .backgroundColor(index === this.currentTab ? AppColor.Primary : Color.Transparent)
+    .animation({ duration: 180, curve: Curve.EaseOut })
+    .onClick(() => {
+      this.switchTab(index);
+    })
+  }
+
   /**
    * 获取导航栏 Tab 项列表（支持中英双语）
    * @returns 根据当前语言返回对应的 TabItem 数组
    */
+  private getTabItems(): TabItem[] {
+    if (this.language === 0) {
+      return [
+        new TabItem('D', '仪表盘'),
+        new TabItem('F', '专注')
+      ];
+    }
+    return [
+      new TabItem('D', 'Dashboard'),
+      new TabItem('F', 'Focus')
+    ];
+  }
+}
+
+// ============================================================================
+// TabItem - 导航栏 Tab 项数据模型
+// ============================================================================
+
+/**
+ * 底部导航栏项数据类
+ * 用于 ForEach 渲染导航栏按钮
+ */
+class TabItem {
+  /** Tab 图标（首字母） */
+  icon: string;
+  /** Tab 名称 */
+  name: string;
+
+  constructor(icon: string, name: string) {
+    this.icon = icon;
+    this.name = name;
+  }
 }

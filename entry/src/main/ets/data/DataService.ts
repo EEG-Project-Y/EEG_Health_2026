@@ -1,21 +1,48 @@
 import { http } from '@kit.NetworkKit';
 import fileIo from '@ohos.file.fs';
-import defaultToAppJson from './ToApp.json';
+import { AppConfig } from '../config/config';
 
-const POLL_INTERVAL_MS: number = 1000;
-const TO_APP_HTTP_ENDPOINT: string = 'http://127.0.0.1:18080/ToApp.json';
-const TO_APP_RUNTIME_PATHS: string[] = [
-  '/data/eeg_health/runtime/ToApp.json',
-  '/data/eeg_health/runtime/currentData.json',
-  '/data/eeg_health/runtime/lastData.json',
-  '/data/app/el2/100/base/com.stitch.healthmonitor/haps/entry/files/ToApp.json'
-];
+export interface EegMetricsJson {
+  focus?: number;
+  fatigue?: number;
+  relax?: number;
+  load?: number;
+  quality?: number;
+  confidence?: number;
+  focusTrend?: number;
+  fatigueTrend?: number;
+  relaxTrend?: number;
+  loadTrend?: number;
+}
 
-type JsonNumber = number | string;
+export interface EegTrendJson {
+  focusTrend?: number;
+  fatigueTrend?: number;
+  relaxTrend?: number;
+  loadTrend?: number;
+}
+
+export interface EegSourceJson {
+  input?: string;
+  dataSource?: string;
+  source?: string;
+  valid?: boolean;
+}
+
+export interface EegChannelStatusJson {
+  ch1?: string;
+  ch2?: string;
+  state?: string;
+  summary?: string;
+}
+
+export interface EegSummaryJson {
+  state?: string;
+  direction?: string;
+}
 
 export interface ToAppJson {
   sequence?: number;
-  timestamp?: number;
   focus?: number;
   fatigue?: number;
   relax?: number;
@@ -27,241 +54,247 @@ export interface ToAppJson {
   relaxTrend?: number;
   loadTrend?: number;
   state?: string;
-  mode?: string;
+  stateLabel?: string;
   direction?: string;
+  channelMode?: string;
+  ch1Valid?: boolean;
+  ch2Valid?: boolean;
+  channelStatus?: string | EegChannelStatusJson;
+  dataSource?: string;
+  source?: string | EegSourceJson;
+  sourcePath?: string;
+  readFrom?: string;
   advice?: string;
   local?: boolean;
   model?: string;
-  summary?: string[];
+  metrics?: EegMetricsJson;
+  trend?: EegTrendJson;
+  summary?: string[] | EegSummaryJson;
 }
 
-interface ToAppPayload {
-  sequence?: JsonNumber;
-  timestamp?: JsonNumber;
-  focus?: JsonNumber;
-  fatigue?: JsonNumber;
-  relax?: JsonNumber;
-  load?: JsonNumber;
-  quality?: JsonNumber;
-  confidence?: JsonNumber;
-  focusTrend?: JsonNumber;
-  fatigueTrend?: JsonNumber;
-  relaxTrend?: JsonNumber;
-  loadTrend?: JsonNumber;
-  state?: string;
-  mode?: string;
-  direction?: string;
-  advice?: string;
-  local?: boolean;
-  model?: string;
-  summary?: string[];
-  data?: ToAppPayload;
+export function getNoDataState(): ToAppJson {
+  return {
+    sequence: 0,
+    focus: 0,
+    fatigue: 0,
+    relax: 0,
+    load: 0,
+    quality: 0,
+    confidence: 0,
+    state: '等待数据',
+    direction: 'no_data',
+    channelMode: 'unknown',
+    ch1Valid: false,
+    ch2Valid: false,
+    channelStatus: '未连接数据源',
+    dataSource: 'none',
+    source: 'no_data',
+    advice: '暂未读取到脑电数据，请检查香橙派链路或 ToApp.json。',
+    local: false,
+    model: 'none'
+  };
 }
-
-export type ToAppJsonCallback = (data: ToAppJson) => void;
 
 export class DataService {
-  private timerId: number = -1;
-  private filesDir: string = '';
-  private hasDeliveredFrame: boolean = false;
-  private pendingHttp: boolean = false;
+  private static instance: DataService | null = null;
+  private intervalId: number = -1;
+  private callback: ((data: ToAppJson) => void) | null = null;
+  private errorCallback: ((message: string) => void) | null = null;
 
-  startReceiving(callback: ToAppJsonCallback, filesDir?: string): void {
+  static getInstance(): DataService {
+    if (!DataService.instance) {
+      DataService.instance = new DataService();
+    }
+    return DataService.instance;
+  }
+
+  startReceiving(callback: (data: ToAppJson) => void, errorCallback?: (message: string) => void, intervalMs: number = 1000): void {
     this.stopReceiving();
-    this.filesDir = filesDir ?? this.filesDir;
-    this.fetchToAppJson(callback);
-    this.timerId = setInterval(() => {
-      this.fetchToAppJson(callback);
-    }, POLL_INTERVAL_MS);
+    this.callback = callback;
+    this.errorCallback = errorCallback ?? null;
+    this.fetchData();
+    this.intervalId = setInterval(() => {
+      this.fetchData();
+    }, intervalMs);
+  }
+
+  refreshOnce(callback: (data: ToAppJson) => void, errorCallback?: (message: string) => void): void {
+    this.callback = callback;
+    this.errorCallback = errorCallback ?? null;
+    this.fetchData();
   }
 
   stopReceiving(): void {
-    if (this.timerId !== -1) {
-      clearInterval(this.timerId);
-      this.timerId = -1;
+    if (this.intervalId !== -1) {
+      clearInterval(this.intervalId);
+      this.intervalId = -1;
     }
   }
 
-  private fetchToAppJson(callback: ToAppJsonCallback): void {
-    this.fetchHttpToAppJson(callback);
-  }
-
-  private fetchHttpToAppJson(callback: ToAppJsonCallback): void {
-    if (this.pendingHttp) {
-      console.warn('[EEG_APP] http request still pending, fallback to file paths');
-      this.fetchFileToAppJson(callback);
-      return;
-    }
-
-    const request = http.createHttp();
-    this.pendingHttp = true;
-    try {
-      request.request(
-        TO_APP_HTTP_ENDPOINT,
-        {
-          method: http.RequestMethod.GET,
-          connectTimeout: 800,
-          readTimeout: 800
-        },
-        (error, data) => {
-          this.pendingHttp = false;
-          try {
-            if (error) {
-              console.error(`[EEG_APP] http read failed endpoint=${TO_APP_HTTP_ENDPOINT}, err=${JSON.stringify(error)}`);
-              this.fetchFileToAppJson(callback);
-              return;
-            }
-
-            const result = data.result;
-            const raw: string = typeof result === 'string' ? result : JSON.stringify(result);
-            if (this.deliverRawJson(raw, `http=${TO_APP_HTTP_ENDPOINT}`, callback)) {
-              return;
-            }
-            this.fetchFileToAppJson(callback);
-          } catch (parseError) {
-            console.error(`[EEG_APP] http parse failed endpoint=${TO_APP_HTTP_ENDPOINT}, err=${JSON.stringify(parseError)}`);
-            this.fetchFileToAppJson(callback);
-          } finally {
-            request.destroy();
-          }
-        }
-      );
-    } catch (requestError) {
-      this.pendingHttp = false;
-      console.error(`[EEG_APP] http request error endpoint=${TO_APP_HTTP_ENDPOINT}, err=${JSON.stringify(requestError)}`);
-      request.destroy();
-      this.fetchFileToAppJson(callback);
-    }
-  }
-
-  private fetchFileToAppJson(callback: ToAppJsonCallback): void {
-    const paths: string[] = this.buildRuntimePaths();
-    for (let index = 0; index < paths.length; index++) {
-      const path: string = paths[index];
-      console.info(`[EEG_APP] reading path=${path}`);
+  private async fetchData(): Promise<void> {
+    for (let i = 0; i < AppConfig.eegHttpEndpoints.length; i++) {
+      const request = http.createHttp();
       try {
-        const raw: string = fileIo.readTextSync(path);
-        if (raw.trim().length === 0) {
-          console.warn(`[EEG_APP] empty json path=${path}`);
-          continue;
-        }
-        if (this.deliverRawJson(raw, `path=${path}`, callback)) {
-          return;
-        }
+        const endpoint = AppConfig.eegHttpEndpoints[i];
+        const response = await request.request(endpoint, {
+          method: http.RequestMethod.GET,
+          connectTimeout: 2000,
+          readTimeout: 2000
+        });
+        const raw = typeof response.result === 'string' ? response.result : JSON.stringify(response.result);
+        const data = this.parseAndNormalize(raw, 'http_toapp', endpoint);
+        this.callback?.(data);
+        return;
       } catch (error) {
-        console.error(`[EEG_APP] read failed path=${path}, err=${JSON.stringify(error)}`);
+        console.error(`[DataService] fetch eeg data failed: ${JSON.stringify(error)}`);
+      } finally {
+        request.destroy();
       }
     }
 
-    if (!this.hasDeliveredFrame) {
-      const fallback: ToAppJson = this.normalizeData(defaultToAppJson as ToAppPayload);
-      this.hasDeliveredFrame = true;
-      console.warn('[EEG_APP] all runtime json paths failed, use bundled ToApp.json');
-      callback(fallback);
+    for (let i = 0; i < AppConfig.eegLocalFiles.length; i++) {
+      const path = AppConfig.eegLocalFiles[i];
+      try {
+        const fallbackSource = path.indexOf('currentData.json') >= 0 ? 'currentData' : 'file_toapp';
+        const raw = fileIo.readTextSync(path);
+        const data = this.parseAndNormalize(raw, fallbackSource, path);
+        this.callback?.(data);
+        return;
+      } catch (error) {
+        console.error(`[DataService] read eeg file failed: ${path}, ${JSON.stringify(error)}`);
+      }
+    }
+
+    this.callback?.(getNoDataState());
+    this.errorCallback?.('no_data');
+  }
+
+  private parseAndNormalize(raw: string, fallbackSource: string, readFrom: string): ToAppJson {
+    const data = JSON.parse(raw) as ToAppJson;
+    this.applyNestedMetrics(data);
+    this.applyNestedSummary(data);
+    data.channelStatus = this.resolveChannelStatusLabel(data.channelStatus);
+
+    const dataSourceLabel = this.resolveDataSourceLabel(data, fallbackSource);
+    const sourceLabel = this.resolveSourceLabel(data, fallbackSource);
+    if (data.dataSource === undefined || data.dataSource.length === 0) {
+      data.dataSource = dataSourceLabel;
+    }
+    if (typeof data.source !== 'string' || data.source.length === 0) {
+      data.source = sourceLabel;
+    }
+    data.readFrom = readFrom;
+    data.sourcePath = readFrom;
+
+    if (!this.hasDisplayData(data)) {
+      throw new Error('EEG payload has no displayable data');
+    }
+    return data;
+  }
+
+  private applyNestedMetrics(data: ToAppJson): void {
+    const metrics = data.metrics;
+    if (!metrics) {
       return;
     }
-
-    console.warn('[EEG_APP] all runtime json paths failed, keep previous frame');
+    data.focus = this.firstNumber(data.focus, metrics.focus);
+    data.fatigue = this.firstNumber(data.fatigue, metrics.fatigue);
+    data.relax = this.firstNumber(data.relax, metrics.relax);
+    data.load = this.firstNumber(data.load, metrics.load);
+    data.quality = this.firstNumber(data.quality, metrics.quality);
+    data.confidence = this.firstNumber(data.confidence, metrics.confidence);
+    data.focusTrend = this.firstNumber(data.focusTrend, metrics.focusTrend);
+    data.fatigueTrend = this.firstNumber(data.fatigueTrend, metrics.fatigueTrend);
+    data.relaxTrend = this.firstNumber(data.relaxTrend, metrics.relaxTrend);
+    data.loadTrend = this.firstNumber(data.loadTrend, metrics.loadTrend);
   }
 
-  private deliverRawJson(raw: string, source: string, callback: ToAppJsonCallback): boolean {
-    if (raw.trim().length === 0) {
-      console.warn(`[EEG_APP] empty json source=${source}`);
-      return false;
+  private applyNestedSummary(data: ToAppJson): void {
+    if (data.trend) {
+      data.focusTrend = this.firstNumber(data.focusTrend, data.trend.focusTrend);
+      data.fatigueTrend = this.firstNumber(data.fatigueTrend, data.trend.fatigueTrend);
+      data.relaxTrend = this.firstNumber(data.relaxTrend, data.trend.relaxTrend);
+      data.loadTrend = this.firstNumber(data.loadTrend, data.trend.loadTrend);
     }
-
-    try {
-      const parsed: ToAppPayload = JSON.parse(raw) as ToAppPayload;
-      const normalized: ToAppJson = this.normalizeData(parsed);
-      this.hasDeliveredFrame = true;
-      console.info(
-        `[EEG_APP] parsed ${source}, sequence=${normalized.sequence}, focus=${normalized.focus}, ` +
-          `fatigue=${normalized.fatigue}, relax=${normalized.relax}, load=${normalized.load}, ` +
-          `quality=${normalized.quality}, confidence=${normalized.confidence}, state=${normalized.state}`
-      );
-      callback(normalized);
-      return true;
-    } catch (error) {
-      console.error(`[EEG_APP] parse failed source=${source}, err=${JSON.stringify(error)}`);
-      return false;
-    }
-  }
-
-  private buildRuntimePaths(): string[] {
-    const paths: string[] = [];
-    if (this.filesDir.length > 0) {
-      this.pushUniquePath(paths, this.filesDir + '/ToApp.json');
-    }
-    for (let index = 0; index < TO_APP_RUNTIME_PATHS.length; index++) {
-      this.pushUniquePath(paths, TO_APP_RUNTIME_PATHS[index]);
-    }
-    return paths;
-  }
-
-  private pushUniquePath(paths: string[], path: string): void {
-    for (let index = 0; index < paths.length; index++) {
-      if (paths[index] === path) {
-        return;
+    if (typeof data.summary === 'object' && data.summary !== null && !Array.isArray(data.summary)) {
+      const summary = data.summary as EegSummaryJson;
+      if ((data.state === undefined || data.state.length === 0) && summary.state !== undefined) {
+        data.state = summary.state;
+      }
+      if ((data.direction === undefined || data.direction.length === 0) && summary.direction !== undefined) {
+        data.direction = summary.direction;
       }
     }
-    paths.push(path);
   }
 
-  private normalizeData(payload: ToAppPayload): ToAppJson {
-    const body: ToAppPayload = payload.data ?? payload;
-    const result: ToAppJson = {};
-
-    result.sequence = this.toNumber(payload.sequence ?? body.sequence);
-    result.timestamp = this.toNumber(payload.timestamp ?? body.timestamp);
-    result.focus = this.toPercent(body.focus);
-    result.fatigue = this.toPercent(body.fatigue);
-    result.relax = this.toPercent(body.relax);
-    result.load = this.toPercent(body.load);
-    result.quality = this.toPercent(body.quality);
-    result.confidence = this.toConfidencePercent(body.confidence ?? payload.confidence);
-    result.focusTrend = this.toNumber(body.focusTrend ?? payload.focusTrend);
-    result.fatigueTrend = this.toNumber(body.fatigueTrend ?? payload.fatigueTrend);
-    result.relaxTrend = this.toNumber(body.relaxTrend ?? payload.relaxTrend);
-    result.loadTrend = this.toNumber(body.loadTrend ?? payload.loadTrend);
-    result.state = body.state ?? payload.state;
-    result.mode = body.mode ?? payload.mode;
-    result.direction = body.direction ?? payload.direction;
-    result.advice = body.advice ?? payload.advice;
-    result.local = body.local ?? payload.local;
-    result.model = body.model ?? payload.model;
-    result.summary = body.summary ?? payload.summary;
-
-    return result;
+  private firstNumber(primary: number | undefined, secondary: number | undefined): number | undefined {
+    if (typeof primary === 'number' && primary === primary) {
+      return primary;
+    }
+    return secondary;
   }
 
-  private toNumber(value: JsonNumber | undefined): number | undefined {
-    if (value === undefined) {
-      return undefined;
+  private resolveDataSourceLabel(data: ToAppJson, fallbackSource: string): string {
+    if (data.dataSource !== undefined && data.dataSource.length > 0) {
+      return data.dataSource;
     }
-    const parsed: number = Number(value);
-    if (Number.isNaN(parsed)) {
-      return undefined;
+    if (typeof data.source === 'string' && data.source.length > 0) {
+      return data.source;
     }
-    return Math.round(parsed);
+    if (typeof data.source === 'object' && data.source !== null) {
+      const sourceInfo = data.source as EegSourceJson;
+      if (sourceInfo.dataSource !== undefined && sourceInfo.dataSource.length > 0) {
+        return sourceInfo.dataSource;
+      }
+      if (sourceInfo.source !== undefined && sourceInfo.source.length > 0) {
+        return sourceInfo.source;
+      }
+    }
+    return fallbackSource;
   }
 
-  private toPercent(value: JsonNumber | undefined): number | undefined {
-    const parsed: number | undefined = this.toNumber(value);
-    if (parsed === undefined) {
-      return undefined;
+  private resolveSourceLabel(data: ToAppJson, fallbackSource: string): string {
+    if (typeof data.source === 'string' && data.source.length > 0) {
+      return data.source;
     }
-    return Math.max(0, Math.min(100, parsed));
+    if (typeof data.source === 'object' && data.source !== null) {
+      const sourceInfo = data.source as EegSourceJson;
+      if (sourceInfo.source !== undefined && sourceInfo.source.length > 0) {
+        return sourceInfo.source;
+      }
+      if (sourceInfo.input !== undefined && sourceInfo.input.length > 0) {
+        return sourceInfo.input;
+      }
+    }
+    return fallbackSource;
   }
 
-  private toConfidencePercent(value: JsonNumber | undefined): number | undefined {
-    if (value === undefined) {
+  private resolveChannelStatusLabel(value: string | EegChannelStatusJson | undefined): string | undefined {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value !== 'object' || value === null) {
       return undefined;
     }
-    const parsed: number = Number(value);
-    if (Number.isNaN(parsed)) {
-      return undefined;
+
+    if (value.summary !== undefined && value.summary.length > 0) {
+      return value.summary;
     }
-    const percent: number = parsed >= 0 && parsed <= 1 ? parsed * 100 : parsed;
-    return Math.max(0, Math.min(100, Math.round(percent)));
+    if (value.state !== undefined && value.state.length > 0) {
+      return value.state;
+    }
+
+    const ch1 = value.ch1 !== undefined && value.ch1.length > 0 ? value.ch1 : 'unknown';
+    const ch2 = value.ch2 !== undefined && value.ch2.length > 0 ? value.ch2 : 'unknown';
+    return `ch1:${ch1} ch2:${ch2}`;
+  }
+
+  private hasDisplayData(data: ToAppJson): boolean {
+    return typeof data.focus === 'number'
+      || typeof data.fatigue === 'number'
+      || typeof data.relax === 'number'
+      || typeof data.load === 'number'
+      || (data.state !== undefined && data.state.length > 0)
+      || (data.advice !== undefined && data.advice.length > 0);
   }
 }
