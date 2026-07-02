@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "ToPAD"
+    },
+    {
+      "name": "module_desc",
+      "value": "ToPAD 脑电监测平板应用入口模块"
+    },
+    {
+      "name": "entryability_desc",
+      "value": "ToPAD 主界面"
+    }
+  ]
+}

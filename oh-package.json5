@@ -1,0 +1,10 @@
+{
+  "modelVersion": "6.1.0",
+  "name": "eegonpad",
+  "version": "1.0.0",
+  "description": "ToPAD EEG brain monitoring tablet app.",
+  "main": "",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}

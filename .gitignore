@@ -1,0 +1,13 @@
+.hvigor/
+.idea/
+build/
+entry/build/
+node_modules/
+local.properties
+*.log
+*.hap
+*.app
+*.hqf
+*.p12
+*.cer
+*.jks
