@@ -15,6 +15,7 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 // 导入窗口管理模块，用于控制应用窗口行为
 import { window } from '@kit.ArkUI';
+import { initSettingsStorage } from '../store/SettingsStore';
 
 export default class EntryAbility extends UIAbility {
   /**
@@ -24,7 +25,7 @@ export default class EntryAbility extends UIAbility {
    * @param launchParam - 启动参数，包含启动原因等
    */
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    // 可在此处添加：数据库初始化、全局配置加载、日志系统初始化等
+    initSettingsStorage();
   }
 
   /**

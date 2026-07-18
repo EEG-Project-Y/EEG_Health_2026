@@ -79,6 +79,9 @@ export class DemoDataService {
   private tickInPhase: number = 0;
   private phaseIndex: number = 0;
   private language: number = 0;
+  private prevTick: { focus: number; fatigue: number; relax: number; load: number; quality: number; confidence: number } =
+    { focus: PHASE_A.metrics.focus, fatigue: PHASE_A.metrics.fatigue, relax: PHASE_A.metrics.relax,
+      load: PHASE_A.metrics.load, quality: PHASE_A.metrics.quality, confidence: PHASE_A.metrics.confidence };
   private prevMetrics: { focus: number; fatigue: number; relax: number; load: number; quality: number; confidence: number } =
     { focus: PHASE_A.metrics.focus, fatigue: PHASE_A.metrics.fatigue, relax: PHASE_A.metrics.relax,
       load: PHASE_A.metrics.load, quality: PHASE_A.metrics.quality, confidence: PHASE_A.metrics.confidence };
@@ -114,6 +117,7 @@ export class DemoDataService {
     this.sequence = 0;
     this.tickInPhase = 0;
     this.phaseIndex = 0;
+    this.prevTick = { ...PHASE_A.metrics };
     this.prevMetrics = { ...PHASE_A.metrics };
     this.generateTick();
     this.intervalId = setInterval(() => {
@@ -126,6 +130,7 @@ export class DemoDataService {
     this.sequence = 0;
     this.tickInPhase = 0;
     this.phaseIndex = 0;
+    this.prevTick = { ...PHASE_A.metrics };
     this.prevMetrics = { ...PHASE_A.metrics };
     this.generateTick();
   }
@@ -148,10 +153,12 @@ export class DemoDataService {
     const quality = Math.round(jitter(lerp(this.prevMetrics.quality, phase.metrics.quality, progress), 3));
     const confidence = Math.round(lerp(this.prevMetrics.confidence, phase.metrics.confidence, progress) * 100) / 100;
 
-    const focusTrend = phase.metrics.focus < this.prevMetrics.focus ? -1 : (phase.metrics.focus > this.prevMetrics.focus ? 1 : 0);
-    const fatigueTrend = phase.metrics.fatigue > this.prevMetrics.fatigue ? 1 : (phase.metrics.fatigue < this.prevMetrics.fatigue ? -1 : 0);
-    const relaxTrend = phase.metrics.relax < this.prevMetrics.relax ? -1 : (phase.metrics.relax > this.prevMetrics.relax ? 1 : 0);
-    const loadTrend = phase.metrics.load > this.prevMetrics.load ? 1 : (phase.metrics.load < this.prevMetrics.load ? -1 : 0);
+    const focusTrend = Math.round((focus - this.prevTick.focus) + (Math.random() - 0.5) * 2);
+    const fatigueTrend = Math.round((fatigue - this.prevTick.fatigue) + (Math.random() - 0.5) * 2);
+    const relaxTrend = Math.round((relax - this.prevTick.relax) + (Math.random() - 0.5) * 2);
+    const loadTrend = Math.round((load - this.prevTick.load) + (Math.random() - 0.5) * 2);
+
+    this.prevTick = { focus, fatigue, relax, load, quality, confidence };
 
     this.sequence += 1;
 

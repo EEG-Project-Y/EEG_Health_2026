@@ -8,7 +8,8 @@ export const SettingsDefaults = {
   fatigueThreshold: 80,
   qualityThreshold: 40,
   confidenceThreshold: 40,
-  bgStyle: 0
+  bgStyle: 0,
+  managementQuery: false
 };
 
 export function initSettingsStorage(): void {
@@ -24,4 +25,5 @@ export function initSettingsStorage(): void {
   AppStorage.SetOrCreate('qualityThreshold', SettingsDefaults.qualityThreshold);
   AppStorage.SetOrCreate('confidenceThreshold', SettingsDefaults.confidenceThreshold);
   AppStorage.SetOrCreate('bgStyle', SettingsDefaults.bgStyle);
+  AppStorage.SetOrCreate('managementQuery', SettingsDefaults.managementQuery);
 }

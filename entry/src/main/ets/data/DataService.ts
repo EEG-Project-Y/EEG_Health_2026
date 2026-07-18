@@ -43,6 +43,7 @@ export interface EegSummaryJson {
 
 export interface ToAppJson {
   sequence?: number;
+  mode?: string;
   focus?: number;
   fatigue?: number;
   relax?: number;
@@ -92,6 +93,39 @@ export function getNoDataState(): ToAppJson {
     advice: '暂未读取到脑电数据，请检查香橙派链路或 ToApp.json。',
     local: false,
     model: 'none'
+  };
+}
+
+export function getMockDataState(): ToAppJson {
+  return {
+    sequence: 108,
+    mode: 'focus_training',
+    focus: 84,
+    fatigue: 16,
+    relax: 57,
+    load: 38,
+    quality: 96,
+    confidence: 0.94,
+    focusTrend: 2,
+    fatigueTrend: -1,
+    relaxTrend: 1,
+    loadTrend: -1,
+    state: 'focused',
+    stateLabel: '专注',
+    direction: 'focus_training',
+    channelMode: 'dual_channel',
+    ch1Valid: true,
+    ch2Valid: true,
+    channelStatus: 'connected',
+    dataSource: 'eeg_device',
+    source: 'local_model',
+    advice: '当前专注状态良好，疲劳水平较低。建议继续保持稳定坐姿，并在 25 分钟训练后短暂休息。',
+    local: true,
+    model: 'qwen2.5-1.5b-instruct-q4_k_m',
+    summary: [
+      '72 min',
+      '16 /100'
+    ]
   };
 }
 
@@ -165,12 +199,22 @@ export class DataService {
       }
     }
 
+    if (AppConfig.enableMockFallback) {
+      const data = this.normalizeData(getMockDataState(), 'eeg_device', 'ToApp.json');
+      this.callback?.(data);
+      return;
+    }
+
     this.callback?.(getNoDataState());
     this.errorCallback?.('no_data');
   }
 
   private parseAndNormalize(raw: string, fallbackSource: string, readFrom: string): ToAppJson {
     const data = JSON.parse(raw) as ToAppJson;
+    return this.normalizeData(data, fallbackSource, readFrom);
+  }
+
+  private normalizeData(data: ToAppJson, fallbackSource: string, readFrom: string): ToAppJson {
     this.applyNestedMetrics(data);
     this.applyNestedSummary(data);
     data.channelStatus = this.resolveChannelStatusLabel(data.channelStatus);

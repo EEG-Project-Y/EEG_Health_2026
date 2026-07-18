@@ -27,17 +27,17 @@ export struct BottomNav {
           Text(item.icon)
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
-            .fontColor(index === this.currentTab ? AppColor.Primary : AppColor.Muted)
+            .fontColor(index === this.currentTab ? AppColor.White : AppColor.Muted)
           Text(item.name)
             .fontSize(12)
             .fontWeight(index === this.currentTab ? FontWeight.Bold : FontWeight.Medium)
-            .fontColor(index === this.currentTab ? AppColor.Primary : AppColor.Muted)
+            .fontColor(index === this.currentTab ? AppColor.White : AppColor.Muted)
         }
         .layoutWeight(1)
         .height(54)
         .justifyContent(FlexAlign.Center)
         .borderRadius(16)
-        .backgroundColor(index === this.currentTab ? '#1A0054CB' : '#00FFFFFF')
+        .backgroundColor(index === this.currentTab ? AppColor.Primary : Color.Transparent)
         .onClick(() => {
           this.onTabChange(index);
         })
@@ -46,7 +46,8 @@ export struct BottomNav {
     .height(82)
     .width('100%')
     .padding({ left: 16, right: 16, top: 8, bottom: 12 })
-    .backgroundColor('#F9F9FFEE')
+    .backgroundColor('#BFFFFFFF')
+    .backdropBlur(20)
     .border({ width: { top: 1 }, color: AppColor.Border })
   }
 }

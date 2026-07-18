@@ -30,6 +30,7 @@
 
 import { DataService, ToAppJson } from '../data/DataService';
 import { DemoDataService } from '../data/DemoDataService';
+import { ManagerBridgeService, ManagerBridgeStatus } from '../data/ManagerBridgeService';
 import { SIMULATOR_DEMO_MODE } from '../config/config';
 
 // ============================================================================
@@ -164,6 +165,14 @@ struct Index {
   @StorageLink('confidenceThreshold') private confidenceThreshold: number = 40;
   /** 背景样式索引：0=白色, 1=蓝色, 2=暖色 */
   @StorageLink('bgStyle') private bgStyle: number = 0;
+  /** 香橙派管理连接窗口状态 */
+  @State private bridgeState: string = 'CLOSED';
+  @State private bridgeSessionId: string = '';
+  @State private bridgeDeviceId: string = '';
+  @State private bridgeRemainingSec: number = 0;
+  @State private bridgeManagerId: string = '';
+  @State private bridgeLastError: string = '';
+  @State private bridgeRequestBusy: boolean = false;
   /** 是否显示全屏安全警告 */
   @State private showSafetyAlert: boolean = false;
   @State private alertTitle: string = '';
@@ -186,6 +195,9 @@ struct Index {
 
   /** 番茄钟 setTimeout 链 ID（-1 表示无待执行 tick） */
   private focusTimerId: number = -1;
+  /** 管理连接采用单链 setTimeout 轮询，防止重复定时器。 */
+  private bridgePollTimerId: number = -1;
+  private bridgePollingEnabled: boolean = false;
   /** 最近一次已处理警告的时间与数据序号 */
   private lastAlertTime: number = 0;
   private lastAlertSequence: number = -1;
@@ -214,10 +226,10 @@ struct Index {
    */
   private getTabName(index: number): string {
     if (this.language === 0) {
-      const zhNames: string[] = ['仪表盘', '专注'];
+      const zhNames: string[] = ['仪表盘', '专注', '连接'];
       return zhNames[index];
     }
-    const enNames: string[] = ['Dashboard', 'Focus'];
+    const enNames: string[] = ['Dashboard', 'Focus', 'Connection'];
     return enNames[index];
   }
 
@@ -226,6 +238,8 @@ struct Index {
   // ==========================================================================
 
   aboutToAppear(): void {
+    this.bridgePollingEnabled = true;
+    this.refreshBridgeStatus();
     if (this.refreshMode === 'auto') {
       this.startAutoRefresh();
     } else {
@@ -414,13 +428,7 @@ struct Index {
     if (typeof value !== 'number' || value !== value) {
       return fallback;
     }
-    if (value > 0) {
-      return 1;
-    }
-    if (value < 0) {
-      return -1;
-    }
-    return 0;
+    return Math.round(value);
   }
 
   private refreshEegDataOnce(): void {
@@ -482,6 +490,113 @@ struct Index {
       return this.t('等待脑电数据 | 数据来源 none', 'Waiting for EEG data | source none');
     }
     return this.t('正在连接ToApp服务', 'Connecting ToApp service');
+  }
+
+  private applyBridgeStatus(status: ManagerBridgeStatus): void {
+    this.bridgeState = status.state;
+    this.bridgeSessionId = status.sessionId;
+    this.bridgeDeviceId = status.deviceId;
+    this.bridgeRemainingSec = status.remainingSec;
+    this.bridgeManagerId = status.connectedManagerId;
+    this.bridgeLastError = status.lastError;
+  }
+
+  private async refreshBridgeStatus(): Promise<void> {
+    if (!this.bridgePollingEnabled) {
+      return;
+    }
+    try {
+      const status = await ManagerBridgeService.status();
+      this.applyBridgeStatus(status);
+    } catch (error) {
+      this.bridgeState = 'ERROR';
+      this.bridgeLastError = 'BACKEND_UNREACHABLE: ' + JSON.stringify(error);
+    }
+    this.scheduleBridgePoll();
+  }
+
+  private scheduleBridgePoll(): void {
+    this.stopBridgePollTimer();
+    if (!this.bridgePollingEnabled) {
+      return;
+    }
+    let intervalMs: number = 0;
+    if (this.bridgeState === 'OPENING' || this.bridgeState === 'ADVERTISING') {
+      intervalMs = 1000;
+    } else if (this.bridgeState === 'CONNECTED') {
+      intervalMs = 4000;
+    }
+    if (intervalMs > 0) {
+      this.bridgePollTimerId = setTimeout(() => {
+        this.bridgePollTimerId = -1;
+        this.refreshBridgeStatus();
+      }, intervalMs);
+    }
+  }
+
+  private stopBridgePollTimer(): void {
+    if (this.bridgePollTimerId !== -1) {
+      clearTimeout(this.bridgePollTimerId);
+      this.bridgePollTimerId = -1;
+    }
+  }
+
+  private async openManagerBridge(): Promise<void> {
+    if (this.bridgeRequestBusy) {
+      return;
+    }
+    this.bridgeRequestBusy = true;
+    this.stopBridgePollTimer();
+    try {
+      this.applyBridgeStatus(await ManagerBridgeService.open(300));
+    } catch (error) {
+      this.bridgeState = 'ERROR';
+      this.bridgeLastError = 'OPEN_FAILED: ' + JSON.stringify(error);
+    } finally {
+      this.bridgeRequestBusy = false;
+      this.scheduleBridgePoll();
+    }
+  }
+
+  private async closeManagerBridge(): Promise<void> {
+    if (this.bridgeRequestBusy) {
+      return;
+    }
+    this.bridgeRequestBusy = true;
+    this.stopBridgePollTimer();
+    try {
+      this.applyBridgeStatus(await ManagerBridgeService.close());
+    } catch (error) {
+      this.bridgeState = 'ERROR';
+      this.bridgeLastError = 'CLOSE_FAILED: ' + JSON.stringify(error);
+    } finally {
+      this.bridgeRequestBusy = false;
+      this.scheduleBridgePoll();
+    }
+  }
+
+  private bridgeStateText(): string {
+    if (this.bridgeState === 'CLOSED') return this.t('已关闭', 'Closed');
+    if (this.bridgeState === 'OPENING') return this.t('正在打开', 'Opening');
+    if (this.bridgeState === 'ADVERTISING') return this.t('等待管理端连接', 'Advertising');
+    if (this.bridgeState === 'CONNECTED') return this.t('管理端已连接', 'Connected');
+    if (this.bridgeState === 'TIMEOUT') return this.t('连接窗口已超时', 'Timed out');
+    return this.t('连接异常', 'Error');
+  }
+
+  private bridgeStateColor(): string {
+    if (this.bridgeState === 'CONNECTED') return AppColor.Good;
+    if (this.bridgeState === 'OPENING' || this.bridgeState === 'ADVERTISING') return AppColor.Primary;
+    if (this.bridgeState === 'ERROR') return AppColor.Danger;
+    if (this.bridgeState === 'TIMEOUT') return AppColor.Warning;
+    return AppColor.Muted;
+  }
+
+  private bridgeCountdownText(): string {
+    const minutes: number = Math.floor(this.bridgeRemainingSec / 60);
+    const seconds: number = this.bridgeRemainingSec % 60;
+    const secondText: string = seconds < 10 ? '0' + seconds.toString() : seconds.toString();
+    return minutes.toString() + ':' + secondText;
   }
 
   private metricText(value: number): string {
@@ -564,17 +679,21 @@ struct Index {
     return value.toString();
   }
 
-  private trendLabel(trend: number): string {
+  /**
+   * 卡片底部趋势说明文案（替代原“数据来源 / http_toapp”文案）
+   * 无数据时保留“等待脑电数据”提示，有数据时展示该卡片对应指标的上升/下降/平稳趋势
+   */
+  private trendNote(value: number): string {
     if (!this.hasEegData) {
-      return '--';
+      return this.t('等待脑电数据', 'Waiting for EEG data');
     }
-    if (trend > 0) {
-      return this.t('↑ 上升', '↑ Rising');
+    if (value > 0) {
+      return this.t('趋势：上升 ↑', 'Trend: up ↑');
     }
-    if (trend < 0) {
-      return this.t('↓ 下降', '↓ Falling');
+    if (value < 0) {
+      return this.t('趋势：下降 ↓', 'Trend: down ↓');
     }
-    return this.t('→ 稳定', '→ Stable');
+    return this.t('趋势：平稳 →', 'Trend: stable →');
   }
 
   private confidencePercentText(): string {
@@ -613,6 +732,8 @@ struct Index {
   aboutToDisappear(): void {
     this.stopAutoRefresh();
     this.pauseFocusTimer();
+    this.bridgePollingEnabled = false;
+    this.stopBridgePollTimer();
   }
 
   // ==========================================================================
@@ -707,7 +828,7 @@ struct Index {
 
   /** 切换 Tab；离开专注页时自动暂停计时 */
   private switchTab(index: number): void {
-    const nextIndex: number = index > 1 ? 1 : Math.max(0, index);
+    const nextIndex: number = index > 2 ? 2 : Math.max(0, index);
     if (this.currentTab === 1 && nextIndex !== 1 && this.timerRunning) {
       this.pauseFocusTimer();
     }
@@ -749,8 +870,10 @@ struct Index {
             // 根据 currentTab 切换显示不同页面
             if (this.currentTab === 0) {
               this.DashboardPage()
-            } else {
+            } else if (this.currentTab === 1) {
               this.FocusPage()
+            } else {
+              this.ConnectionPage()
             }
           }
           .width('100%')
@@ -825,7 +948,7 @@ struct Index {
 
       // 中间：上行为问候语，下行为当前页面标题
       Column() {
-        Text(this.currentTab === 0 ? this.t('早上好', 'Good morning') : this.t('健康同步', 'HealthSync'))
+        Text(this.currentTab === 0 ? this.t('早上好', 'Good morning') : this.currentTab === 2 ? this.t('设备连接', 'Device') : this.t('健康同步', 'HealthSync'))
           .fontSize(12)
           .fontColor(AppColor.Muted)
         Text(this.getTabName(this.currentTab))
@@ -1062,18 +1185,18 @@ struct Index {
   MetricGrid() {
     Column({ space: 10 }) {
       Row({ space: 10 }) {
-        this.MetricCard(this.t('实时专注', 'Live Focus'), this.metricText(this.focusScore), '/100', AppColor.Good, this.connectionNote(), this.metricProgress(this.focusScore), this.focusTrend)
-        this.MetricCard(this.t('疲劳指数', 'Fatigue Index'), this.metricText(this.fatigueScore), '/100', AppColor.Danger, this.hasEegData ? this.dataState : this.connectionNote(), this.metricProgress(this.fatigueScore), this.fatigueTrend)
+        this.MetricCard(this.t('实时专注', 'Live Focus'), this.metricText(this.focusScore), '/100', AppColor.Good, this.trendNote(this.focusTrend), this.metricProgress(this.focusScore), this.focusTrend)
+        this.MetricCard(this.t('疲劳指数', 'Fatigue Index'), this.metricText(this.fatigueScore), '/100', AppColor.Danger, this.trendNote(this.fatigueTrend), this.metricProgress(this.fatigueScore), this.fatigueTrend)
       }
       .width('100%')
       Row({ space: 10 }) {
-        this.MetricCard(this.t('放松', 'Relax'), this.metricText(this.relaxScore), '/100', AppColor.Primary, this.dataSourceNote(), this.metricProgress(this.relaxScore), this.relaxTrend)
-        this.MetricCard(this.t('负荷', 'Load'), this.metricText(this.loadScore), '/100', AppColor.Warning, this.dataSourceNote(), this.metricProgress(this.loadScore), this.loadTrend)
+        this.MetricCard(this.t('放松', 'Relax'), this.metricText(this.relaxScore), '/100', AppColor.Primary, this.trendNote(this.relaxTrend), this.metricProgress(this.relaxScore), this.relaxTrend)
+        this.MetricCard(this.t('负荷', 'Load'), this.metricText(this.loadScore), '/100', AppColor.Warning, this.trendNote(this.loadTrend), this.metricProgress(this.loadScore), this.loadTrend)
       }
       .width('100%')
       Row({ space: 10 }) {
-        this.MetricCard(this.t('信号质量', 'Signal Quality'), this.metricText(this.qualityScore), '/100', AppColor.Cyan, this.dataSourceNote(), this.metricProgress(this.qualityScore), 0)
-        this.MetricCard(this.t('置信度', 'Confidence'), this.confidencePercentText(), '%', AppColor.Violet, this.dataSourceNote(), this.confidenceProgress(), 0)
+        this.MetricCard(this.t('信号质量', 'Signal Quality'), this.metricText(this.qualityScore), '/100', AppColor.Cyan, this.trendNote(0), this.metricProgress(this.qualityScore), 0)
+        this.MetricCard(this.t('置信度', 'Confidence'), this.confidencePercentText(), '%', AppColor.Violet, this.trendNote(0), this.confidenceProgress(), 0)
       }
       .width('100%')
     }
@@ -1088,6 +1211,11 @@ struct Index {
           .fontSize(13)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColor.Muted)
+        Blank()
+        Text(this.trendText(trend))
+          .fontSize(14)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(trend > 0 ? AppColor.Good : (trend < 0 ? AppColor.Danger : AppColor.Muted))
       }
       .width('100%')
 
@@ -2386,11 +2514,147 @@ struct Index {
   }
 
   // ==========================================================================
+  // @Builder 方法 - 连接页面（Connection）
+  // ==========================================================================
+
+  /** 香橙派管理连接窗口：APP 仅调用本机 HTTP，不直接控制 SLE。 */
+  @Builder
+  ConnectionPage() {
+    Column({ space: 14 }) {
+      Column({ space: 14 }) {
+        Row() {
+          Column({ space: 4 }) {
+            Text(this.t('管理连接', 'Management Connection'))
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(AppColor.Text)
+            Text(this.bridgeStateText())
+              .fontSize(13)
+              .fontColor(this.bridgeStateColor())
+          }
+          .alignItems(HorizontalAlign.Start)
+          Blank()
+          Text(this.bridgeCountdownText())
+            .fontSize(24)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.bridgeStateColor())
+        }
+        .width('100%')
+
+        Divider().color(AppColor.Border)
+
+        Row() {
+          Text(this.t('边缘端 ID', 'Edge ID'))
+            .fontSize(13)
+            .fontColor(AppColor.Muted)
+          Blank()
+          Text(this.bridgeDeviceId.length > 0 ? this.bridgeDeviceId : '--')
+            .fontSize(13)
+            .fontColor(AppColor.Text)
+        }
+        .width('100%')
+
+        Row() {
+          Text(this.t('会话 ID', 'Session ID'))
+            .fontSize(13)
+            .fontColor(AppColor.Muted)
+          Blank()
+          Text(this.bridgeSessionId.length > 0 ? this.bridgeSessionId : '--')
+            .fontSize(13)
+            .fontColor(AppColor.Text)
+        }
+        .width('100%')
+
+        Row() {
+          Text(this.t('已连接管理端', 'Connected Manager'))
+            .fontSize(13)
+            .fontColor(AppColor.Muted)
+          Blank()
+          Text(this.bridgeManagerId.length > 0 ? this.bridgeManagerId : '--')
+            .fontSize(13)
+            .fontColor(AppColor.Text)
+        }
+        .width('100%')
+
+        if (this.bridgeLastError.length > 0) {
+          Text(this.bridgeLastError)
+            .width('100%')
+            .fontSize(12)
+            .fontColor(AppColor.Danger)
+            .backgroundColor('#12FF4D4F')
+            .borderRadius(10)
+            .padding(10)
+        }
+
+        Row({ space: 10 }) {
+          Button(this.bridgeRequestBusy ? this.t('处理中', 'Working') : this.t('打开 5 分钟', 'Open for 5 min'))
+            .layoutWeight(1)
+            .height(44)
+            .fontSize(14)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White)
+            .backgroundColor(AppColor.Primary)
+            .enabled(!this.bridgeRequestBusy &&
+              this.bridgeState !== 'OPENING' && this.bridgeState !== 'ADVERTISING' &&
+              this.bridgeState !== 'CONNECTED')
+            .onClick(() => {
+              this.openManagerBridge();
+            })
+
+          Button(this.t('关闭', 'Close'))
+            .layoutWeight(1)
+            .height(44)
+            .fontSize(14)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(AppColor.Danger)
+            .backgroundColor('#10FF4D4F')
+            .enabled(!this.bridgeRequestBusy &&
+              (this.bridgeState === 'OPENING' || this.bridgeState === 'ADVERTISING' ||
+                this.bridgeState === 'CONNECTED'))
+            .onClick(() => {
+              this.closeManagerBridge();
+            })
+        }
+        .width('100%')
+
+        Text(this.t('窗口最长 300 秒；关闭页面会停止状态轮询，但不会擅自延长会话。',
+          'The window is capped at 300 seconds. Leaving this page stops polling without extending it.'))
+          .width('100%')
+          .fontSize(12)
+          .fontColor(AppColor.Muted)
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor(AppColor.Card)
+      .borderRadius(16)
+      .border({ width: 1, color: AppColor.Border })
+
+      Column({ space: 8 }) {
+        Text(this.t('连接路径', 'Connection Path'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(AppColor.Text)
+        Text(this.t('边缘端 APP → 香橙派后端 → UART → 小熊派 B → SLE 管理端',
+          'Edge APP → Orange Pi backend → UART → BearPi B → SLE manager'))
+          .fontSize(13)
+          .fontColor(AppColor.Muted)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .padding(16)
+      .backgroundColor(AppColor.Card)
+      .borderRadius(16)
+      .border({ width: 1, color: AppColor.Border })
+    }
+    .width('100%')
+  }
+
+  // ==========================================================================
   // @Builder 方法 - 底部导航栏
   // ==========================================================================
 
   /**
-   * 底部导航栏（2 个 Tab）
+   * 底部导航栏（3 个 Tab）
    * 毛玻璃背景胶囊，选中态为纯色填充。
    */
   @Builder
@@ -2445,12 +2709,14 @@ struct Index {
     if (this.language === 0) {
       return [
         new TabItem('D', '仪表盘'),
-        new TabItem('F', '专注')
+        new TabItem('F', '专注'),
+        new TabItem('C', '连接')
       ];
     }
     return [
       new TabItem('D', 'Dashboard'),
-      new TabItem('F', 'Focus')
+      new TabItem('F', 'Focus'),
+      new TabItem('C', 'Connection')
     ];
   }
 }
